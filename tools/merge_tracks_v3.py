@@ -9,7 +9,7 @@ from collections import defaultdict
 import matplotlib
 import matplotlib.pyplot as plt
 from loguru import logger
-from tracker.Deep_EIoU import STrack
+# from tracker.Deep_EIoU import STrack
 import shutil # used for copying files
 from tqdm import tqdm
 
@@ -122,16 +122,15 @@ class Tracklet:
 # 2. Test code
 # 3. Delete unused lines/functions
 
+PROCESS = 'Split+Connect'
 # Define hyperparameters for merging tracklets
 SPATIAL_FACTOR = 1        # spatial constraint factor restricting spatial distance between two targets to be merged
-SELF_DIST_FACTOR = 2      # Multiplier for the self-distance of a track to set a dynamic merging threshold.
-MAX_DIST = 0.4            # Define the upper bound for the dynamic merging threshold, ensuring it stays within a reasonable range.
-MIN_DIST = 0.4            # Define the lower bound
+MERGE_DIST_THRES = 0.4            # Define the merging distance threshold (upper bound)
 
 # DEFINE hyperparameters for splitting tracklets
 LEN_THRES = 100
 MAX_K = 5   # NOTE: higher number of clusters significantly increases runtime in distance map calculation
-INNER_DIST_THRES = 0.5
+INNER_DIST_THRES = 0.4
 
 '''def heatmap_archive(data, row_labels, col_labels, ax=None,
             cbar_kw=None, cbarlabel="", **kwargs):
@@ -726,12 +725,7 @@ def merge_tracklets(tracklets, seq_name, seq2Dist, Dist, max_x_range, max_y_rang
     #   Step 3: update distance matrix
     diagonal_mask = np.eye(Dist.shape[0], dtype=bool)
     non_diagonal_mask = ~diagonal_mask
-    while (np.any(Dist[non_diagonal_mask] < MAX_DIST)):
-        # track1_idx, track2_idx = np.unravel_index(np.argmin(Dist[non_diagonal_mask]), Dist.shape)
-        # print(np.min(Dist[non_diagonal_mask]), Dist[track2_idx][track1_idx])
-        # # FIXME: currently np.min(Dist[non_diagonal_mask]) != Dist[track1_idx][track2_idx]
-        # # FIXME: ...
-        # print("Min distance:", np.min(Dist[non_diagonal_mask]), "at", track1_idx, track2_idx)
+    while (np.any(Dist[non_diagonal_mask] < MERGE_DIST_THRES)):
         # Get the indices of the minimum value considering the mask
         min_index = np.argmin(Dist[non_diagonal_mask])
         min_value = np.min(Dist[non_diagonal_mask])
@@ -802,7 +796,7 @@ def merge_tracklets_new(tracklets, seq_name, seq2Dist, Dist, max_x_range, max_y_
     while True:
         diagonal_mask = np.eye(len(Dist), dtype=bool)
         non_diagonal_mask = ~diagonal_mask
-        if not np.any(Dist[non_diagonal_mask] < MAX_DIST):
+        if not np.any(Dist[non_diagonal_mask] < MERGE_DIST_THRES):
             break  # Exit the loop if no elements in Dist are below the threshold
         
         track1_idx, track2_idx = np.unravel_index(np.argmin(Dist[non_diagonal_mask]), Dist.shape)
@@ -856,9 +850,26 @@ def save_results(sct_output_path, tracklets):
 def main():
     # data_path = os.path.join('..', '..')
     # seq_path = os.path.join(data_path,'Tracklets')
-    seq_tracks_dir = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\tracking-2023\test_Seq_Tracklets'
+    seq_tracks_dir = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\ByteTrack_Results\ByteTrack_Tracklets_test'
     data_path = os.path.dirname(seq_tracks_dir)
     seqs_tracks = os.listdir(seq_tracks_dir)
+    process = PROCESS
+    
+    tracker = os.path.basename(seq_tracks_dir).split('_')[0]
+    if 'ByteTrack' in seq_tracks_dir:
+        tracker = 'ByteTrack'
+    elif 'DeepEIoU' in seq_tracks_dir:
+        tracker = 'DeepEIoU'
+    else:
+        assert tracker in ('ByteTrack', 'DeepEIoU',)
+
+    if 'SportsMOT' in seq_tracks_dir:
+        dataset = 'SportsMOT'
+    elif 'SoccerNet' in seq_tracks_dir:
+        dataset = 'SoccerNet'
+    else:
+        assert dataset
+
     seqs_tracks.sort()
     seq2Dist = dict()                       # sequence name -> distance matrix used to display Dist, debug line, delete later
 
@@ -880,23 +891,28 @@ def main():
         # seq2Dist[seq_name] = Dist                               # save all seqs distance matrix, debug line, delete later
         # displayDist(seq2Dist, seq_name, isMerged=False, isSplit=False)         # used to display Dist, debug line, delete later
 
-        print(f"----------------Number of tracklets before splitting: {len(tmp_trklets)}----------------")
-        splitTracklets = split_tracklets(tmp_trklets)
-        print(f"----------------Number of tracklets after splitting: {len(splitTracklets)}----------------")
-
+        if 'Split' in process:
+            print(f"----------------Number of tracklets before splitting: {len(tmp_trklets)}----------------")
+            splitTracklets = split_tracklets(tmp_trklets)
+            # print(f"----------------Number of tracklets after splitting: {len(splitTracklets)}----------------")
+        else:
+            splitTracklets = tmp_trklets
+        
         Dist = getDistanceMap(splitTracklets)
 
+        print(f"----------------Number of tracklets before merging: {len(splitTracklets)}----------------")
+        
         mergedTracklets = merge_tracklets(splitTracklets, seq_name, seq2Dist, Dist, max_x_range, max_y_range)
 
         print(f"----------------Number of tracklets after merging: {len(mergedTracklets)}----------------")
 
-        sct_name = f'SoccerNetTest_SplitConnect_SCT_innerDistThres{INNER_DIST_THRES}_MaxK_{MAX_K}_MergeDistThres-{MAX_DIST}_selfDistFactor-{SELF_DIST_FACTOR}_spatialFactor_{SPATIAL_FACTOR}'
+        sct_name = f'{tracker}_{dataset}_{process}_innerDist{INNER_DIST_THRES}_K{MAX_K}_MergeDist{MERGE_DIST_THRES}_spatialFactor{SPATIAL_FACTOR}'
         # sct_name = f'SoccertNetTest_Baseline_SCT'
         os.makedirs(os.path.join(data_path, sct_name), exist_ok=True)
         new_sct_output_path = os.path.join(data_path, sct_name, '{}.txt'.format(seq_name))
         save_results(new_sct_output_path, mergedTracklets)
 
-    print("Done! Processed", len(seq2Dist), "sequences", f"Merged each sequence's tracks with {MAX_DIST} as threshold")
+    print("Done! Processed", len(seq2Dist), "sequences", f"Merged each sequence's tracks with {MERGE_DIST_THRES} as threshold")
 
 if __name__ == "__main__":
     main()

@@ -1,13 +1,12 @@
-# This script produces tracklets given tracking results and original sequence frame in RGB images.
-# This script produces tracklets given tracking results and original sequence frame in RGB images.
+# This script produces tracklets given tracking results and original sequence frame as RGB images.
 
 # from pathlib import Path
 
 import torchreid
 import sys
 # HACK: directly import util from folder path, but interferes with os.path's current path
-# sys.path.append('C:\Users\Ciel Sun\OneDrive - UW\EE 599\TrackLink\reid\torchreid')
-sys.path.append('')
+sys.path.append(r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\TrackLink\reid\torchreid')
+# sys.path.append('')
 from utils import FeatureExtractor
 
 import os
@@ -116,19 +115,29 @@ val_transforms = T.Compose([
         T.ToTensor(),
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
-    
+
+# HACK: due to change of sys.path, directly specify model_path
+    # model_path = os.path.join('..', 'checkpoints', 'sports_model.pth.tar-60'),
+model_path = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\TrackLink\checkpoints\sports_model.pth.tar-60'
+data_path = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\tracking-2023\test' # directory for all sequences' images and ground truth (optional)
+# data_path = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SportsMOT\dataset\test'
+pred_dir = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\ByteTrack_Results\ByteTrack_Baseline'   # directory containing txt files for sequences' predicitons
+tracker = 'ByteTrack'
+split = os.path.basename(data_path)
+# TODO: handle error cases if files/dirs not found
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 extractor = FeatureExtractor(
     model_name='osnet_x1_0',
     # HACK: due to change of sys.path, directly specify model_path
     # model_path = os.path.join('..', 'checkpoints', 'sports_model.pth.tar-60'),
-    model_path = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\TrackLink\checkpoints\sports_model.pth.tar-60',
-    device='cuda'
+    model_path = model_path,
+    device=device
 )
 
-data_path = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\tracking-2023\test' # directory for all sequences' images and ground truth (optional)
-pred_dir = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\SCT2'   # directory containing txt files for sequences' predicitons
-
-output_dir = os.path.join(os.path.dirname(data_path), f'{os.path.basename(data_path)}_Seq_Tracklets')  # output directory for sequences' tracklets
+# output_dir = os.path.join(os.path.dirname(data_path), f'{os.path.basename(data_path)}_Seq_Tracklets')  # output directory for sequences' tracklets
+# os.makedirs(output_dir, exist_ok=True)
+output_dir = os.path.join(os.path.dirname(pred_dir), f'{tracker}_Tracklets_{split}')  # output directory for sequences' tracklets
 os.makedirs(output_dir, exist_ok=True)
 
 seqs = sorted([file for file in os.listdir(pred_dir) if file.endswith('.txt')])
@@ -156,13 +165,15 @@ for s_id, seq in tqdm(enumerate(seqs, 1), total=len(seqs), desc='Processing Seqs
         input_batch = None    # input batch to speed up processing
         tid2idx = {}
 
-
+        # debug section
+        # if len(frame_res) == 0:
+        #     print(f'No detection results for seq: {seq}, frame: {frame_id}')
+        
         # NOTE MOT annotation format:
         # <frame>, <id>, <bb_left>, <bb_top>, <bb_width>, <bb_height>, <conf>, <x>, <y>, <z>
         for idx, (frame, track_id, l, t, w, h, score, _, _, _) in enumerate(frame_res):
             # Update tracklet with detection
             bbox = [l, t, w, h]
-
             if track_id not in seq_tracks:
                 seq_tracks[track_id] = Tracklet(track_id, frame, score, bbox)
             else:
@@ -175,14 +186,23 @@ for s_id, seq in tqdm(enumerate(seqs, 1), total=len(seqs), desc='Processing Seqs
                     input_batch = im
             else:
                 input_batch = torch.cat([input_batch, im], dim=0)
-        features = extractor(input_batch)    # len(features) == len(frame_res)
-        feats = features.cpu().detach().numpy()
         
-        # update tracklets with feature
-        for tid, idx in tid2idx.items():
-            feat = feats[tid2idx[tid]]
-            feat /= np.linalg.norm(feat)
-            seq_tracks[tid].append_feat(feat)
+        # # debug section
+        # if input_batch is None:
+        #     print(f'seq: {seq}, frame: {frame_id} no input_batch from detection')
+        #     break
+        
+        if input_batch is not None:
+            features = extractor(input_batch)    # len(features) == len(frame_res)
+            feats = features.cpu().detach().numpy()
+            
+            # update tracklets with feature
+            for tid, idx in tid2idx.items():
+                feat = feats[tid2idx[tid]]
+                feat /= np.linalg.norm(feat)
+                seq_tracks[tid].append_feat(feat)
+        else:
+            print(f"No detection at frame: {frame_id}")
     
     # save seq_tracks into pickle file
     track_output_path = os.path.join(output_dir,  f'{seq}.pkl')
