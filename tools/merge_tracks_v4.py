@@ -9,265 +9,31 @@ from collections import defaultdict
 import matplotlib
 import matplotlib.pyplot as plt
 from loguru import logger
-from tracker.Deep_EIoU import STrack
+# from tracker.Deep_EIoU import STrack
 import shutil # used for copying files
 from tqdm import tqdm
 
 from sklearn.cluster import AgglomerativeClustering
+from sklearn.cluster import DBSCAN
+from sklearn.preprocessing import StandardScaler
+from scipy.spatial.distance import cdist
 
-class Tracklet_archive:
-    def __init__(self):
-        '''
-        Initialize the Tracklet with None value fields
-        '''
-        self.track_id = None
-        self.parent_id = None
-        self.scores = None
-        self.times = None
-        self.bboxes = None
-        self.features = None
-
-    def __init__(self, track_id, frames, scores, bboxes, feats=None):
-        '''
-        Initialize the Tracklet with IDs, times, scores, bounding boxes, and optional features.
-        - frames, scores can be lists or single elements.
-        - bboxes can be a single list of 4 elements or a list of lists where each sublist has 4 elements.
-        - feats should be a list of numpy arrays each of shape (512,) or None.
-        '''
-        self.track_id = track_id
-        self.parent_id = None
-        # Ensure inputs are list type; convert single elements to lists
-        self.scores = scores if isinstance(scores, list) else [scores]
-        self.times = frames if isinstance(frames, list) else [frames]
-
-        self.bboxes = bboxes if (isinstance(bboxes[0], list)) else [bboxes]
-        self.features = feats if feats is not None else []
-
-    def append_det(self, frame, score, bbox):
-        # frame (float), score (float), bbox (list(4))
-        self.scores.append(score)
-        self.times.append(frame)
-        self.bboxes.append(bbox)
-
-    def append_feat(self, feat):
-        # feat (numpy array)
-        self.features.append(feat)
-
-    def extract(self, start, end):
-        subtrack = Tracklet()
-        subtrack.times = self.times[start : end + 1]
-        subtrack.bboxes = self.bboxes[start : end + 1]
-        subtrack.track_id = self.track_id
-        subtrack.parent_tid = self.track_id
-        return subtrack
-
-class Tracklet:
-    def __init__(self, track_id=None, frames=None, scores=None, bboxes=None, feats=None):
-        '''
-        Initialize the Tracklet with IDs, times, scores, bounding boxes, and optional features.
-        If parameters are not provided, initializes them to None or empty lists.
-
-        Args:
-            track_id (int, optional): Unique identifier for the track. Defaults to None.
-            frames (list or int, optional): Frame numbers where the track is present. Can be a list of frames or a single frame. Defaults to None.
-            scores (list or float, optional): Detection scores corresponding to frames. Can be a list of scores or a single score. Defaults to None.
-            bboxes (list of lists or list, optional): Bounding boxes corresponding to each frame. Each bounding box is a list of 4 elements. Defaults to None.
-            feats (list of np.array, optional): Feature vectors corresponding to frames. Each feature should be a numpy array of shape (512,). Defaults to None.
-        '''
-        self.track_id = track_id
-        self.parent_id = None
-        self.scores = scores if isinstance(scores, list) else [scores] if scores is not None else []
-        self.times = frames if isinstance(frames, list) else [frames] if frames is not None else []
-        self.bboxes = bboxes if isinstance(bboxes, list) and bboxes and isinstance(bboxes[0], list) else [bboxes] if bboxes is not None else []
-        self.features = feats if feats is not None else []
-
-    def append_det(self, frame, score, bbox):
-        '''
-        Appends a detection to the tracklet.
-
-        Args:
-            frame (int): Frame number for the detection.
-            score (float): Detection score.
-            bbox (list of float): Bounding box with four elements [x, y, width, height].
-        '''
-        self.scores.append(score)
-        self.times.append(frame)
-        self.bboxes.append(bbox)
-
-    def append_feat(self, feat):
-        '''
-        Appends a feature vector to the tracklet.
-
-        Args:
-            feat (np.array): Feature vector of shape (512,).
-        '''
-        self.features.append(feat)
-
-    def extract(self, start, end):
-        '''
-        Extracts a subtrack from the tracklet between two indices.
-
-        Args:
-            start (int): Start index for the extraction.
-            end (int): End index for the extraction.
-
-        Returns:
-            Tracklet: A new Tracklet object that is a subset of the original from start to end indices.
-        '''
-        subtrack = Tracklet(self.track_id, self.times[start:end + 1], self.scores[start:end + 1], self.bboxes[start:end + 1], self.features[start:end + 1] if self.features else None)
-        return subtrack
+from generate_tracklets import Tracklet
 
 # TODO:
 # 1. Add comments to functions and hyperparameters
 # 2. Test code
 # 3. Delete unused lines/functions
 
+PROCESS = 'Split+Connect'
 # Define hyperparameters for merging tracklets
 SPATIAL_FACTOR = 1        # spatial constraint factor restricting spatial distance between two targets to be merged
-SELF_DIST_FACTOR = 2      # Multiplier for the self-distance of a track to set a dynamic merging threshold.
-MAX_DIST = 0.4            # Define the upper bound for the dynamic merging threshold, ensuring it stays within a reasonable range.
-MIN_DIST = 0.4            # Define the lower bound
+MERGE_DIST_THRES = 0.4            # Define the merging distance threshold (upper bound)
 
 # DEFINE hyperparameters for splitting tracklets
 LEN_THRES = 100
 MAX_K = 3   # NOTE: higher number of clusters significantly increases runtime in distance map calculation
-INNER_DIST_THRES = 0.3
-
-'''def heatmap_archive(data, row_labels, col_labels, ax=None,
-            cbar_kw=None, cbarlabel="", **kwargs):
-    """
-    Create a heatmap from a numpy array and two lists of labels.
-
-    Parameters
-    ----------
-    data
-        A 2D numpy array of shape (M, N).
-    row_labels
-        A list or array of length M with the labels for the rows.
-    col_labels
-        A list or array of length N with the labels for the columns.
-    axls
-        A `matplotlib.axes.Axes` instance to which the heatmap is plotted.  If
-        not provided, use current axes or create a new one.  Optional.
-    cbar_kw
-        A dictionary with arguments to `matplotlib.Figure.colorbar`.  Optional.
-    cbarlabel
-        The label for the colorbar.  Optional.
-    **kwargs
-        All other arguments are forwarded to `imshow`.
-    """
-
-    if ax is None:
-        ax = plt.gca()
-
-    if cbar_kw is None:
-        cbar_kw = {}
-
-    # Plot the heatmap
-    im = ax.imshow(data, **kwargs)
-
-    # Create colorbar
-    cbar = ax.figure.colorbar(im, ax=ax, **cbar_kw)
-    cbar.ax.set_ylabel(cbarlabel, rotation=-90, va="bottom")
-
-    # Show all ticks and label them with the respective list entries.
-    ax.set_xticks(np.arange(data.shape[1]), labels=col_labels)
-    ax.set_yticks(np.arange(data.shape[0]), labels=row_labels)
-
-    # Let the horizontal axes labeling appear on top.
-    ax.tick_params(top=True, bottom=False,
-                   labeltop=True, labelbottom=False)
-
-    # Rotate the tick labels and set their alignment.
-    plt.setp(ax.get_xticklabels(), rotation=-30, ha="right",
-             rotation_mode="anchor")
-
-    # Turn spines off and create white grid.
-    ax.spines[:].set_visible(False)
-
-    ax.set_xticks(np.arange(data.shape[1]+1)-.5, minor=True)
-    ax.set_yticks(np.arange(data.shape[0]+1)-.5, minor=True)
-    ax.grid(which="minor", color="w", linestyle='-', linewidth=3)
-    ax.tick_params(which="minor", bottom=False, left=False)
-
-    return im, cbar'''
-
-'''def annotate_heatmap_archive(im, data=None, valfmt="{x:.2f}",
-                     textcolors=("black", "white"),
-                     threshold=None, **textkw):
-    """
-    A function to annotate a heatmap.
-
-    Parameters
-    ----------
-    im
-        The AxesImage to be labeled.
-    data
-        Data used to annotate.  If None, the image's data is used.  Optional.
-    valfmt
-        The format of the annotations inside the heatmap.  This should either
-        use the string format method, e.g. "$ {x:.2f}", or be a
-        `matplotlib.ticker.Formatter`.  Optional.
-    textcolors
-        A pair of colors.  The first is used for values below a threshold,
-        the second for those above.  Optional.
-    threshold
-        Value in data units according to which the colors from textcolors are
-        applied.  If None (the default) uses the middle of the colormap as
-        separation.  Optional.
-    **kwargs
-        All other arguments are forwarded to each call to `text` used to create
-        the text labels.
-    """
-
-    if not isinstance(data, (list, np.ndarray)):
-        data = im.get_array()
-
-    # Normalize the threshold to the images color range.
-    if threshold is not None:
-        threshold = im.norm(threshold)
-    else:
-        threshold = im.norm(data.max())/2.
-
-    # Set default alignment to center, but allow it to be
-    # overwritten by textkw.
-    kw = dict(horizontalalignment="center",
-              verticalalignment="center")
-    kw.update(textkw)
-
-    # Get the formatter in case a string is supplied
-    if isinstance(valfmt, str):
-        valfmt = matplotlib.ticker.StrMethodFormatter(valfmt)
-
-    # Loop over the data and create a `Text` for each "pixel".
-    # Change the text's color depending on the data.
-    texts = []
-    for i in range(data.shape[0]):
-        for j in range(data.shape[1]):
-            kw.update(color=textcolors[int(im.norm(data[i, j]) > threshold)])
-            text = im.axes.text(j, i, valfmt(data[i, j], None), **kw)
-            texts.append(text)
-
-    return texts'''
-
-'''def displayDist_archive(Dist_dict, num_of_displays=5):
-    seqs = sorted(Dist_dict.keys())
-    if num_of_displays > len(seqs):
-        num_of_displays = len(seqs)
-    for i in range(num_of_displays):
-        seq = seqs[i]
-        Dist = Dist_dict[seq]
-        # fig, ax = plt.subplots()
-        # ticks = np.arange(len(Dist))
-        # im, cbar = heatmap_archive(Dist, ticks, ticks, ax=ax, cmap='binary', cbarlabel='distance')
-        # texts = annotate_heatmap_archive(im, valfmt="{x:.2f}")
-        # fig.tight_layout()
-        # plt.show()
-
-        plt.imshow(Dist, cmap='binary')
-        plt.colorbar()
-        plt.title(seq)
-        plt.show()'''
+CLUSTER_DIST_THRES = 0.7
 
 def find_consecutive_segments(track_times):
     """
@@ -656,7 +422,6 @@ def check_spatial_constraints(trk_1, trk_2, max_x_range, max_y_range):
             subtrack_1st = subtrack_2nd
     return inSpatialRange
 
-# FIXME: after splitting there should be more tracklets than original, current total number of tracklets after split could reduce.
 def split_tracklets(tmp_trklets):
     """
     Splits each tracklet into multiple tracklets based on an internal distance threshold.
@@ -684,7 +449,7 @@ def split_tracklets(tmp_trklets):
 
             average_cosine_distance = get_avg_inner_distance(trklet.features)
             # if average_cosine_distance < inner_dist_thres
-            if average_cosine_distance < INNER_DIST_THRES:      # NOTE: set inner distance threshold
+            if average_cosine_distance < CLUSTER_DIST_THRES:      # NOTE: set inner distance threshold
                 tracklets[tid] = trklet
             else:
                 # print('large dist', tid, len(trklet.times), average_cosine_distance)
@@ -695,7 +460,7 @@ def split_tracklets(tmp_trklets):
                     for i in range(k):
                         # check purity of each clustered tracklet
                         tmp_embs = embs[labels == i]
-                        if get_avg_inner_distance(tmp_embs) > INNER_DIST_THRES:
+                        if get_avg_inner_distance(tmp_embs) > CLUSTER_DIST_THRES:
                             recluster = True
                             break
                     if not recluster or k == MAX_K:
@@ -710,6 +475,126 @@ def split_tracklets(tmp_trklets):
                             # TODO: create new tracklet object
                             tracklets[new_id] = Tracklet(new_id, tmp_frames.tolist(), tmp_scores.tolist(), tmp_bboxes.tolist(), feats=tmp_embs.tolist())
                             new_id += 1
+    assert len(tracklets) >= len(tmp_trklets)
+    return tracklets
+
+def detect_id_switch(embs, eps=CLUSTER_DIST_THRES, min_samples=5, max_clusters=3):
+    """
+    Detects identity switches within a tracklet using clustering.
+
+    Args:
+        embs (list of numpy arrays): A list where each element is a numpy array representing an embedding.
+                                     Each embedding has the same dimensionality.
+        eps (float): The maximum distance between two samples for one to be considered as in the neighborhood of the other.
+        min_samples (int): The number of samples in a neighborhood for a point to be considered as a core point.
+
+    Returns:
+        bool: True if an identity switch is detected, otherwise False.
+    """
+    if len(embs) > 15000:
+        embs = embs[1::2]
+
+    embs = np.stack(embs)
+    
+    # Standardize the embeddings
+    scaler = StandardScaler()
+    embs_scaled = scaler.fit_transform(embs)
+
+    # Apply DBSCAN clustering
+    db = DBSCAN(eps=eps, min_samples=min_samples, metric='cosine').fit(embs_scaled)
+    labels = db.labels_
+    
+    # Count the number of clusters (excluding noise)
+    unique_labels = np.unique(labels)
+    unique_labels = unique_labels[unique_labels != -1]
+
+    if -1 in labels:
+        # Find the cluster centers
+        cluster_centers = np.array([embs_scaled[labels == label].mean(axis=0) for label in unique_labels])
+        
+        # Assign noise points to the nearest cluster
+        noise_indices = np.where(labels == -1)[0]
+        for idx in noise_indices:
+            distances = cdist([embs_scaled[idx]], cluster_centers, metric='cosine')
+            nearest_cluster = np.argmin(distances)
+            labels[idx] = list(unique_labels)[nearest_cluster]
+    
+    n_clusters = len(unique_labels)
+
+    if n_clusters > max_clusters:
+        # Merge clusters to ensure the number of clusters does not exceed max_clusters
+        while n_clusters > max_clusters:
+            cluster_centers = np.array([embs_scaled[labels == label].mean(axis=0) for label in unique_labels])
+            distance_matrix = cdist(cluster_centers, cluster_centers, metric='cosine')
+            np.fill_diagonal(distance_matrix, np.inf)  # Ignore self-distances
+            
+            # Find the closest pair of clusters
+            min_dist_idx = np.unravel_index(np.argmin(distance_matrix), distance_matrix.shape)
+            cluster_to_merge_1, cluster_to_merge_2 = unique_labels[min_dist_idx[0]], unique_labels[min_dist_idx[1]]
+
+            # Merge the clusters
+            labels[labels == cluster_to_merge_2] = cluster_to_merge_1
+            unique_labels = np.unique(labels)
+            unique_labels = unique_labels[unique_labels != -1]
+            n_clusters = len(unique_labels)
+
+    return n_clusters > 1, labels
+
+# TODO: modify and refine and test function
+def split_tracklets_v2(tmp_trklets, min_samples=5, len_thres=100):
+    """
+    Splits each tracklet into multiple tracklets based on an internal distance threshold.
+
+    Args:
+        tmp_trklets (dict): Dictionary of tracklets to be processed.
+        eps (float): The maximum distance between two samples for one to be considered as in the neighborhood of the other.
+        min_samples (int): The number of samples in a neighborhood for a point to be considered as a core point.
+        inner_dist_thres (float): Threshold for the average inner distance to decide splitting.
+        len_thres (int): Length threshold to filter out short tracklets.
+        max_k (int): Maximum number of clusters to consider.
+
+    Returns:
+        dict: New dictionary of tracklets after splitting.
+    """
+    new_id = max(tmp_trklets.keys()) + 1
+    tracklets = defaultdict()
+    # Splitting algorithm to process every tracklet in a sequence
+    for tid in tqdm(sorted(list(tmp_trklets.keys())), total=len(tmp_trklets), desc="Splitting tracklets"):
+        trklet = tmp_trklets[tid]
+        if len(trklet.times) < len_thres:  # NOTE: Set tracklet length threshold to filter out short ones
+            tracklets[tid] = trklet
+        else:
+            embs = np.stack(trklet.features)
+            frames = np.array(trklet.times)
+            bboxes = np.stack(trklet.bboxes)
+            scores = np.array(trklet.scores)
+
+            # average_cosine_distance = get_avg_inner_distance(trklet.features)
+            # if average_cosine_distance < inner_dist_thres:  # NOTE: Set inner distance threshold
+            #     tracklets[tid] = trklet
+            # else:
+
+            # Perform DBSCAN clustering
+            id_switch_detected, clusters = detect_id_switch(embs, eps=CLUSTER_DIST_THRES, min_samples=min_samples, max_clusters=MAX_K)
+
+            if not id_switch_detected:
+                tracklets[tid] = trklet
+            else:
+                unique_labels = set(clusters)
+
+                for label in unique_labels:
+                    if label == -1:
+                        continue  # Skip noise points
+                    tmp_embs = embs[clusters == label]
+                    tmp_frames = frames[clusters == label]
+                    tmp_bboxes = bboxes[clusters == label]
+                    tmp_scores = scores[clusters == label]
+                    assert new_id not in tmp_trklets
+                    # TODO: Create new tracklet object
+                    tracklets[new_id] = Tracklet(new_id, tmp_frames.tolist(), tmp_scores.tolist(), tmp_bboxes.tolist(), feats=tmp_embs.tolist())
+                    new_id += 1
+
+    assert len(tracklets) >= len(tmp_trklets)
     return tracklets
 
 def merge_tracklets(tracklets, seq_name, seq2Dist, Dist, max_x_range, max_y_range):
@@ -725,12 +610,7 @@ def merge_tracklets(tracklets, seq_name, seq2Dist, Dist, max_x_range, max_y_rang
     #   Step 3: update distance matrix
     diagonal_mask = np.eye(Dist.shape[0], dtype=bool)
     non_diagonal_mask = ~diagonal_mask
-    while (np.any(Dist[non_diagonal_mask] < MAX_DIST)):
-        # track1_idx, track2_idx = np.unravel_index(np.argmin(Dist[non_diagonal_mask]), Dist.shape)
-        # print(np.min(Dist[non_diagonal_mask]), Dist[track2_idx][track1_idx])
-        # # FIXME: currently np.min(Dist[non_diagonal_mask]) != Dist[track1_idx][track2_idx]
-        # # FIXME: ...
-        # print("Min distance:", np.min(Dist[non_diagonal_mask]), "at", track1_idx, track2_idx)
+    while (np.any(Dist[non_diagonal_mask] < MERGE_DIST_THRES)):
         # Get the indices of the minimum value considering the mask
         min_index = np.argmin(Dist[non_diagonal_mask])
         min_value = np.min(Dist[non_diagonal_mask])
@@ -742,7 +622,6 @@ def merge_tracklets(tracklets, seq_name, seq2Dist, Dist, max_x_range, max_y_rang
         # print(f"Minimum value in masked Dist: {min_value}")
         # print(f"Corresponding value in Dist using recalculated indices: {Dist[track1_idx, track2_idx]}")
 
-        # Demonstrate the issue is fixed
         assert min_value == Dist[track1_idx, track2_idx], "Values should match!"
 
         track1 = tracklets[idx2tid[track1_idx]]
@@ -802,7 +681,7 @@ def merge_tracklets_new(tracklets, seq_name, seq2Dist, Dist, max_x_range, max_y_
     while True:
         diagonal_mask = np.eye(len(Dist), dtype=bool)
         non_diagonal_mask = ~diagonal_mask
-        if not np.any(Dist[non_diagonal_mask] < MAX_DIST):
+        if not np.any(Dist[non_diagonal_mask] < MERGE_DIST_THRES):
             break  # Exit the loop if no elements in Dist are below the threshold
         
         track1_idx, track2_idx = np.unravel_index(np.argmin(Dist[non_diagonal_mask]), Dist.shape)
@@ -856,9 +735,29 @@ def save_results(sct_output_path, tracklets):
 def main():
     # data_path = os.path.join('..', '..')
     # seq_path = os.path.join(data_path,'Tracklets')
-    seq_tracks_path = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\tracking-2023\test_Seq_Tracklets'
-    data_path = os.path.dirname(seq_tracks_path)
-    seqs_tracks = os.listdir(seq_tracks_path)
+    seq_tracks_dir = r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\SORT_Results\SORT_Tracklets_test"
+    data_path = os.path.dirname(seq_tracks_dir)
+    seqs_tracks = os.listdir(seq_tracks_dir)
+    # TODO: assert all file names in seqs_tracks end in .pkl
+    process = PROCESS
+    
+    tracker = os.path.basename(seq_tracks_dir).split('_')[0]
+    if 'ByteTrack' in seq_tracks_dir:
+        tracker = 'ByteTrack'
+    elif 'DeepEIoU' in seq_tracks_dir:
+        tracker = 'DeepEIoU'
+    elif 'SORT' in seq_tracks_dir:
+        tracker = 'SORT'
+    else:
+        assert tracker in ('ByteTrack', 'DeepEIoU', 'SORT')
+
+    if 'SportsMOT' in seq_tracks_dir:
+        dataset = 'SportsMOT'
+    elif 'SoccerNet' in seq_tracks_dir:
+        dataset = 'SoccerNet'
+    else:
+        assert dataset
+
     seqs_tracks.sort()
     seq2Dist = dict()                       # sequence name -> distance matrix used to display Dist, debug line, delete later
 
@@ -871,7 +770,7 @@ def main():
 
         seq_name = seq.split('.')[0]
         logger.info(f"Processing seq {seq_idx+1} / {len(seqs_tracks)}")
-        with open(os.path.join(seq_tracks_path, seq), 'rb') as pkl_f:
+        with open(os.path.join(seq_tracks_dir, seq), 'rb') as pkl_f:
             tmp_trklets = pickle.load(pkl_f)     # dict(key:track id, value:tracklet)
         
         max_x_range, max_y_range = get_spatial_constraints(tmp_trklets, SPATIAL_FACTOR)
@@ -880,21 +779,27 @@ def main():
         # seq2Dist[seq_name] = Dist                               # save all seqs distance matrix, debug line, delete later
         # displayDist(seq2Dist, seq_name, isMerged=False, isSplit=False)         # used to display Dist, debug line, delete later
 
-        print(f"----------------Number of tracklets before splitting: {len(tmp_trklets)}----------------")
-        splitTracklets = split_tracklets(tmp_trklets)
-        print(f"----------------Number of tracklets after splitting: {len(splitTracklets)}----------------")
-
-
+        if 'Split' in process:
+            print(f"----------------Number of tracklets before splitting: {len(tmp_trklets)}----------------")
+            splitTracklets = split_tracklets_v2(tmp_trklets, min_samples=5, len_thres=100)
+            # print(f"----------------Number of tracklets after splitting: {len(splitTracklets)}----------------")
+        else:
+            splitTracklets = tmp_trklets
+        
         Dist = getDistanceMap(splitTracklets)
 
+        print(f"----------------Number of tracklets before merging: {len(splitTracklets)}----------------")
+        
         mergedTracklets = merge_tracklets(splitTracklets, seq_name, seq2Dist, Dist, max_x_range, max_y_range)
 
-        sct_name = f'SoccerNetTest_SplitConnect_SCT_innerDistThres{INNER_DIST_THRES}_MaxK_{MAX_K}_distThreshRange_{MIN_DIST}-{MAX_DIST}_selfDistFactor-{SELF_DIST_FACTOR}_spatialFactor_{SPATIAL_FACTOR}'
+        print(f"----------------Number of tracklets after merging: {len(mergedTracklets)}----------------")
+
+        sct_name = f'{tracker}_{dataset}_{process}_clusterDist{CLUSTER_DIST_THRES}_K{MAX_K}_MergeDist{MERGE_DIST_THRES}_spatialFactor{SPATIAL_FACTOR}'
         os.makedirs(os.path.join(data_path, sct_name), exist_ok=True)
         new_sct_output_path = os.path.join(data_path, sct_name, '{}.txt'.format(seq_name))
         save_results(new_sct_output_path, mergedTracklets)
 
-    print("Done! Processed", len(seq2Dist), "sequences", f"Merged each sequence's tracks with {MIN_DIST} <= self_dist * 2 <= {MAX_DIST} as threshold")
+    print("Done! Processed", len(seq2Dist), "sequences", f"Merged each sequence's tracks with {MERGE_DIST_THRES} as threshold")
 
 if __name__ == "__main__":
     main()

@@ -15,107 +15,63 @@ from tqdm import tqdm
 
 from sklearn.cluster import AgglomerativeClustering
 
-class Tracklet_archive:
-    def __init__(self):
-        '''
-        Initialize the Tracklet with None value fields
-        '''
-        self.track_id = None
-        self.parent_id = None
-        self.scores = None
-        self.times = None
-        self.bboxes = None
-        self.features = None
+from generate_tracklets import Tracklet
 
-    def __init__(self, track_id, frames, scores, bboxes, feats=None):
-        '''
-        Initialize the Tracklet with IDs, times, scores, bounding boxes, and optional features.
-        - frames, scores can be lists or single elements.
-        - bboxes can be a single list of 4 elements or a list of lists where each sublist has 4 elements.
-        - feats should be a list of numpy arrays each of shape (512,) or None.
-        '''
-        self.track_id = track_id
-        self.parent_id = None
-        # Ensure inputs are list type; convert single elements to lists
-        self.scores = scores if isinstance(scores, list) else [scores]
-        self.times = frames if isinstance(frames, list) else [frames]
+# class Tracklet:
+#     def __init__(self, track_id=None, frames=None, scores=None, bboxes=None, feats=None):
+#         '''
+#         Initialize the Tracklet with IDs, times, scores, bounding boxes, and optional features.
+#         If parameters are not provided, initializes them to None or empty lists.
 
-        self.bboxes = bboxes if (isinstance(bboxes[0], list)) else [bboxes]
-        self.features = feats if feats is not None else []
+#         Args:
+#             track_id (int, optional): Unique identifier for the track. Defaults to None.
+#             frames (list or int, optional): Frame numbers where the track is present. Can be a list of frames or a single frame. Defaults to None.
+#             scores (list or float, optional): Detection scores corresponding to frames. Can be a list of scores or a single score. Defaults to None.
+#             bboxes (list of lists or list, optional): Bounding boxes corresponding to each frame. Each bounding box is a list of 4 elements. Defaults to None.
+#             feats (list of np.array, optional): Feature vectors corresponding to frames. Each feature should be a numpy array of shape (512,). Defaults to None.
+#         '''
+#         self.track_id = track_id
+#         self.parent_id = None
+#         self.scores = scores if isinstance(scores, list) else [scores] if scores is not None else []
+#         self.times = frames if isinstance(frames, list) else [frames] if frames is not None else []
+#         self.bboxes = bboxes if isinstance(bboxes, list) and bboxes and isinstance(bboxes[0], list) else [bboxes] if bboxes is not None else []
+#         self.features = feats if feats is not None else []
 
-    def append_det(self, frame, score, bbox):
-        # frame (float), score (float), bbox (list(4))
-        self.scores.append(score)
-        self.times.append(frame)
-        self.bboxes.append(bbox)
+#     def append_det(self, frame, score, bbox):
+#         '''
+#         Appends a detection to the tracklet.
 
-    def append_feat(self, feat):
-        # feat (numpy array)
-        self.features.append(feat)
+#         Args:
+#             frame (int): Frame number for the detection.
+#             score (float): Detection score.
+#             bbox (list of float): Bounding box with four elements [x, y, width, height].
+#         '''
+#         self.scores.append(score)
+#         self.times.append(frame)
+#         self.bboxes.append(bbox)
 
-    def extract(self, start, end):
-        subtrack = Tracklet()
-        subtrack.times = self.times[start : end + 1]
-        subtrack.bboxes = self.bboxes[start : end + 1]
-        subtrack.track_id = self.track_id
-        subtrack.parent_tid = self.track_id
-        return subtrack
+#     def append_feat(self, feat):
+#         '''
+#         Appends a feature vector to the tracklet.
 
-class Tracklet:
-    def __init__(self, track_id=None, frames=None, scores=None, bboxes=None, feats=None):
-        '''
-        Initialize the Tracklet with IDs, times, scores, bounding boxes, and optional features.
-        If parameters are not provided, initializes them to None or empty lists.
+#         Args:
+#             feat (np.array): Feature vector of shape (512,).
+#         '''
+#         self.features.append(feat)
 
-        Args:
-            track_id (int, optional): Unique identifier for the track. Defaults to None.
-            frames (list or int, optional): Frame numbers where the track is present. Can be a list of frames or a single frame. Defaults to None.
-            scores (list or float, optional): Detection scores corresponding to frames. Can be a list of scores or a single score. Defaults to None.
-            bboxes (list of lists or list, optional): Bounding boxes corresponding to each frame. Each bounding box is a list of 4 elements. Defaults to None.
-            feats (list of np.array, optional): Feature vectors corresponding to frames. Each feature should be a numpy array of shape (512,). Defaults to None.
-        '''
-        self.track_id = track_id
-        self.parent_id = None
-        self.scores = scores if isinstance(scores, list) else [scores] if scores is not None else []
-        self.times = frames if isinstance(frames, list) else [frames] if frames is not None else []
-        self.bboxes = bboxes if isinstance(bboxes, list) and bboxes and isinstance(bboxes[0], list) else [bboxes] if bboxes is not None else []
-        self.features = feats if feats is not None else []
+#     def extract(self, start, end):
+#         '''
+#         Extracts a subtrack from the tracklet between two indices.
 
-    def append_det(self, frame, score, bbox):
-        '''
-        Appends a detection to the tracklet.
+#         Args:
+#             start (int): Start index for the extraction.
+#             end (int): End index for the extraction.
 
-        Args:
-            frame (int): Frame number for the detection.
-            score (float): Detection score.
-            bbox (list of float): Bounding box with four elements [x, y, width, height].
-        '''
-        self.scores.append(score)
-        self.times.append(frame)
-        self.bboxes.append(bbox)
-
-    def append_feat(self, feat):
-        '''
-        Appends a feature vector to the tracklet.
-
-        Args:
-            feat (np.array): Feature vector of shape (512,).
-        '''
-        self.features.append(feat)
-
-    def extract(self, start, end):
-        '''
-        Extracts a subtrack from the tracklet between two indices.
-
-        Args:
-            start (int): Start index for the extraction.
-            end (int): End index for the extraction.
-
-        Returns:
-            Tracklet: A new Tracklet object that is a subset of the original from start to end indices.
-        '''
-        subtrack = Tracklet(self.track_id, self.times[start:end + 1], self.scores[start:end + 1], self.bboxes[start:end + 1], self.features[start:end + 1] if self.features else None)
-        return subtrack
+#         Returns:
+#             Tracklet: A new Tracklet object that is a subset of the original from start to end indices.
+#         '''
+#         subtrack = Tracklet(self.track_id, self.times[start:end + 1], self.scores[start:end + 1], self.bboxes[start:end + 1], self.features[start:end + 1] if self.features else None)
+#         return subtrack
 
 # TODO:
 # 1. Add comments to functions and hyperparameters
@@ -129,8 +85,8 @@ MERGE_DIST_THRES = 0.4            # Define the merging distance threshold (upper
 
 # DEFINE hyperparameters for splitting tracklets
 LEN_THRES = 100
-MAX_K = 5   # NOTE: higher number of clusters significantly increases runtime in distance map calculation
-INNER_DIST_THRES = 0.4
+MAX_K = 3   # NOTE: higher number of clusters significantly increases runtime in distance map calculation
+INNER_DIST_THRES = 0.3
 
 '''def heatmap_archive(data, row_labels, col_labels, ax=None,
             cbar_kw=None, cbarlabel="", **kwargs):
@@ -850,9 +806,11 @@ def save_results(sct_output_path, tracklets):
 def main():
     # data_path = os.path.join('..', '..')
     # seq_path = os.path.join(data_path,'Tracklets')
-    seq_tracks_dir = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\ByteTrack_Results\ByteTrack_Tracklets_test'
+    seq_tracks_dir = r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SportsMOT\Sort_Results\SORT_Tracklets_test"
+    
     data_path = os.path.dirname(seq_tracks_dir)
     seqs_tracks = os.listdir(seq_tracks_dir)
+    # TODO: assert all file names in seqs_tracks end in .pkl
     process = PROCESS
     
     tracker = os.path.basename(seq_tracks_dir).split('_')[0]
@@ -860,8 +818,10 @@ def main():
         tracker = 'ByteTrack'
     elif 'DeepEIoU' in seq_tracks_dir:
         tracker = 'DeepEIoU'
+    elif 'SORT' in seq_tracks_dir:
+        tracker = 'SORT'
     else:
-        assert tracker in ('ByteTrack', 'DeepEIoU',)
+        assert tracker in ('ByteTrack', 'DeepEIoU', 'SORT')
 
     if 'SportsMOT' in seq_tracks_dir:
         dataset = 'SportsMOT'
@@ -907,7 +867,6 @@ def main():
         print(f"----------------Number of tracklets after merging: {len(mergedTracklets)}----------------")
 
         sct_name = f'{tracker}_{dataset}_{process}_innerDist{INNER_DIST_THRES}_K{MAX_K}_MergeDist{MERGE_DIST_THRES}_spatialFactor{SPATIAL_FACTOR}'
-        # sct_name = f'SoccertNetTest_Baseline_SCT'
         os.makedirs(os.path.join(data_path, sct_name), exist_ok=True)
         new_sct_output_path = os.path.join(data_path, sct_name, '{}.txt'.format(seq_name))
         save_results(new_sct_output_path, mergedTracklets)
