@@ -2,3 +2,4 @@
 *.pkl
 *.jpg
 _temp
+tools\__pycache__
