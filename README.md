@@ -98,42 +98,44 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
 Here is the refined instructions section with the correct syntax for running the scripts:
 
 ## Instructions for Running
+NOTE:
+Make sure to replace placeholders (e.g., `{}`) with actual values when running the commands.
 
 1. Generate tracklets with your own tracking results:
     ```bash
     cd tools
-    python generate_tracklets.py --model_path {checkpoint of reid model weight} \
-                                 --data_path {dataset directory} \
-                                 --pred_dir {directory containing prediction files} \
-                                 --tracker {tracker name for results saving}
+    python generate_tracklets.py --model_path {reid model weight}
+                                 --data_path {dataset directory}
+                                 --pred_dir {tracking results direcotry}
+                                 --tracker {tracker name}
     ```
+    - `--model_path`: Specify the path to reid model's checkpoint file (default is `../reid_checkpoints/sports_model.pth.tar-60`)
+    - `--data_path`: Specify directory of dataset's split data (e.g. `SoccerNet/tracking-2023/test`).
+    - `--pred_dir`: Specify directory of tracking results txt files.
+    - `--tracker`: Indicate tracker's name for file saving.
 
 2. Refine tracklets:
     ```bash
-    python refine.py --dataset {Dataset name (e.g., SportsMOT, SoccerNet)} \
-                     --tracker {Tracker name} \
-                     --track_src {Source directory of tracklet pkl files} \
-                     --use_split \
-                     --min_len 100 \
-                     --eps 0.6 \
-                     --min_samples 10 \
-                     --max_k 3 \
-                     --use_connect \
-                     --spatial_factor 1.0 \
+    python refine_tracklets.py --dataset {dataset name}
+                     --tracker {tracker name}
+                     --track_src {source directory of tracklet pkl files}
+                     --use_split
+                     --min_len 100
+                     --eps 0.6
+                     --min_samples 10
+                     --max_k 3
+                     --use_connect
+                     --spatial_factor 1.0
                      --merge_dist_thres 0.4
     ```
-
-Make sure to replace placeholders (e.g., `{Dataset name (e.g., SportsMOT, SoccerNet)}`) with actual values when running the commands.
-
-### Explanation:
-- `--dataset`: Specify the dataset name (e.g., SportsMOT, SoccerNet).
-- `--tracker`: Specify the tracker name.
-- `--track_src`: Path to the directory containing the tracklet `.pkl` files.
-- `--use_split`: Include this flag to use the split component.
-- `--min_len`: Minimum length for a tracklet required for splitting (default is 100).
-- `--eps`: Maximum distance between two samples for DBSCAN clustering (default is 0.6).
-- `--min_samples`: Minimum number of samples in a neighborhood for a point to be considered a core point (default is 10).
-- `--max_k`: Maximum number of clusters/subtracklets to be output by the splitting component (default is 3).
-- `--use_connect`: Include this flag to use the connecting component.
-- `--spatial_factor`: Factor to adjust spatial distances (default is 1.0).
-- `--merge_dist_thres`: Minimum cosine distance between two tracklets for merging (default is 0.4).
+    - `--dataset`: Specify the dataset name (e.g., SportsMOT, SoccerNet) for file saving.
+    - `--tracker`: Specify the tracker name for file saving.
+    - `--track_src`: Path to the directory containing the tracklet `.pkl` files.
+    - `--use_split`: Include this flag to use the split component.
+    - `--min_len`: Minimum length for a tracklet required for splitting (default is 100).
+    - `--eps`: Maximum distance between two samples for DBSCAN clustering (default is 0.6).
+    - `--min_samples`: Minimum number of samples in a neighborhood for a point to be considered a core point (default is 10).
+    - `--max_k`: Maximum number of clusters/subtracklets to be output by the splitting component (default is 3).
+    - `--use_connect`: Include this flag to use the connecting component.
+    - `--spatial_factor`: Factor to adjust spatial constraints (default is 1.0).
+    - `--merge_dist_thres`: Minimum cosine distance between two tracklets for merging (default is 0.4).
