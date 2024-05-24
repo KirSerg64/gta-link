@@ -26,3 +26,11 @@ The connector uses a clustering method that employs cosine similarity of the tra
 ## Application
 
 While the system is developed for offline processing, its adaptability allows for integration into online systems through a sliding window approach, making it versatile across different operational settings.
+
+
+## Instalation
+- create environment, python=3.9
+- activate environmnet
+- install requirements.txt
+- install pytorch
+- open reid folder and run python setup.py develop
