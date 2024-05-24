@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This project introduces a universal, model-agnostic method designed to refine and enhance tracklet association for single-camera Multi-Object Tracking ([MOT](https://motchallenge.net/)). It is primarily developed for datasets such as [SportsMOT](https://github.com/MCG-NJU/SportsMOT) or [SoccerNet](https://github.com/SoccerNet/sn-tracking) but is also applicable to any MOT datasets. The approach is developed as an offline post-processing tool.
+This project introduces a universal, model-agnostic method designed to refine and enhance tracklet association for single-camera Multi-Object Tracking ([MOT](https://motchallenge.net/)). The method is primarily developed for datasets such as [SportsMOT](https://github.com/MCG-NJU/SportsMOT) or [SoccerNet](https://github.com/SoccerNet/sn-tracking) but is also applicable to any MOT datasets. The approach is developed as an offline post-processing tool.
 <!-- TODO: add results on datasets -->
 
 ## Methodology
