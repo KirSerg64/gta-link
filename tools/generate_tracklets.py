@@ -1,6 +1,4 @@
 # This script produces tracklets given tracking results and original sequence frame as RGB images.
-
-# from pathlib import Path
 import argparse
 from torchreid.utils import FeatureExtractor
 
@@ -80,26 +78,16 @@ def main(model_path, data_path, pred_dir, tracker):
             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
 
-    # HACK: due to change of sys.path, directly specify model_path
-    # model_path = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\TrackLink\checkpoints\sports_model.pth.tar-60'
-    # data_path = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\tracking-2023\test' # directory for all sequences' images and ground truth (optional)
-    # # data_path = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SportsMOT\dataset\test'
-    # pred_dir = r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\ByteTrack_Results\ByteTrack_Baseline'   # directory containing txt files for sequences' predicitons
-    # tracker = 'ByteTrack'
     split = os.path.basename(data_path)
     # TODO: handle error cases if files/dirs not found
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     extractor = FeatureExtractor(
         model_name='osnet_x1_0',
-        # HACK: due to change of sys.path, directly specify model_path
-        # model_path = os.path.join('..', 'checkpoints', 'sports_model.pth.tar-60'),
         model_path = model_path,
         device=device
     )
 
-    # output_dir = os.path.join(os.path.dirname(data_path), f'{os.path.basename(data_path)}_Seq_Tracklets')  # output directory for sequences' tracklets
-    # os.makedirs(output_dir, exist_ok=True)
     output_dir = os.path.join(os.path.dirname(pred_dir), f'{tracker}_Tracklets_{split}')  # output directory for sequences' tracklets
     os.makedirs(output_dir, exist_ok=True)
 
@@ -157,8 +145,8 @@ def main(model_path, data_path, pred_dir, tracker):
         
         # save seq_tracks into pickle file
         track_output_path = os.path.join(output_dir,  f'{seq}.pkl')
-        # with open(track_output_path, 'wb') as f:          # FIXME: uncomment
-        #     pickle.dump(seq_tracks, f)
+        with open(track_output_path, 'wb') as f:
+            pickle.dump(seq_tracks, f)
         logger.info(f"save tracklets info to {track_output_path}")
 
 if __name__ == "__main__":
@@ -166,22 +154,21 @@ if __name__ == "__main__":
     parser.add_argument('--model_path',
                         type=str,
                         default=os.path.join('..', 'reid_checkpoints', 'sports_model.pth.tar-60'),
-                        # required=True,
                         help="Path to the model file.")
     parser.add_argument('--data_path',
                         type=str,
                         default=r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\tracking-2023\test",
-                        # required=True,
+                        required=True,
                         help="Directory containing data files.")
     parser.add_argument('--pred_dir',
                         type=str,
                         default=r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\DeepEIoU_Results\DeepEIoU_Baseline",
-                        # required=True,
+                        required=True,
                         help="Directory containing prediction files.")
     parser.add_argument('--tracker',
                         type=str,
                         default='DeepEIoU',
-                        # required=True,
+                        required=True,
                         help="Name of the tracker.")
     
     args = parser.parse_args()
