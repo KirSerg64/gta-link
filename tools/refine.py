@@ -2,15 +2,13 @@ import numpy as np
 import os
 import torch
 import pickle
-import sys
 
 from collections import defaultdict
 import matplotlib.pyplot as plt
 from loguru import logger
 from tqdm import tqdm
 
-from sklearn.cluster import AgglomerativeClustering
-from sklearn.cluster import DBSCAN, HDBSCAN
+from sklearn.cluster import DBSCAN
 from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import cdist
 
@@ -216,7 +214,7 @@ def get_distance_matrix(tid2track):
                 Dist[i][j] = get_distance(track1_id, track2_id, track1, track2)
     return Dist
 
-def get_distancee(track1_id, track2_id, track1, track2):
+def get_distance(track1_id, track2_id, track1, track2):
     """
     Calculates the cosine distance between two tracks using PyTorch for efficient computation.
 
@@ -400,7 +398,6 @@ def split_tracklets(tmp_trklets, eps=None, max_k=None, min_samples=None, len_thr
             scores = np.array(trklet.scores)
             # Perform DBSCAN clustering
             id_switch_detected, clusters = detect_id_switch(embs, eps=eps, min_samples=min_samples, max_clusters=max_k)
-            # id_switch_detected, clusters = detect_id_switch_HDBSCAN(embs, min_cluster_size=min_samples, min_samples=min_samples, max_clusters=MAX_K)
             if not id_switch_detected:
                 tracklets[tid] = trklet
             else:
@@ -504,7 +501,7 @@ def save_results(sct_output_path, tracklets):
         f.writelines(txt_results)
     logger.info(f"save SCT results to {sct_output_path}")
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(description="Global tracklet association with splitting and connecting.")
     parser.add_argument('--dataset',
                         type=str,
@@ -562,10 +559,10 @@ def main():
                         default=0.4,
                         required=True,
                         help='Minimum cosine distance between two tracklets for merging.')
+    return parser.parse_args()
 
-    args = parser.parse_args()
-    
-
+def main():
+    args = parse_args()
     # Determine the process based on the flags
     if args.use_split and args.use_connect:
         process = "Split+Connect"
@@ -615,7 +612,6 @@ def main():
         mergedTracklets = merge_tracklets(splitTracklets, seq2Dist, Dist, seq_name=seq_name, max_x_range=max_x_range, max_y_range=max_y_range, merge_dist_thres=args.merge_dist_thres)
 
         print(f"----------------Number of tracklets after merging: {len(mergedTracklets)}----------------")
-
         
         sct_name = f'{tracker}_{dataset}_{process}_eps{args.eps}_minSamples{args.min_samples}_K{args.max_k}_mergeDist{args.merge_dist_thres}_spatial{args.spatial_factor}'
         os.makedirs(os.path.join(data_path, sct_name), exist_ok=True)
