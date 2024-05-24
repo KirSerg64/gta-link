@@ -145,8 +145,8 @@ def main(model_path, data_path, pred_dir, tracker):
         
         # save seq_tracks into pickle file
         track_output_path = os.path.join(output_dir,  f'{seq}.pkl')
-        with open(track_output_path, 'wb') as f:
-            pickle.dump(seq_tracks, f)
+        # with open(track_output_path, 'wb') as f:
+        #     pickle.dump(seq_tracks, f)
         logger.info(f"save tracklets info to {track_output_path}")
 
 if __name__ == "__main__":
@@ -158,17 +158,17 @@ if __name__ == "__main__":
     parser.add_argument('--data_path',
                         type=str,
                         default=r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\tracking-2023\test",
-                        required=True,
+                        # required=True,
                         help="Directory containing data files.")
     parser.add_argument('--pred_dir',
                         type=str,
                         default=r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\DeepEIoU_Results\DeepEIoU_Baseline",
-                        required=True,
+                        # required=True,
                         help="Directory containing prediction files.")
     parser.add_argument('--tracker',
                         type=str,
                         default='DeepEIoU',
-                        required=True,
+                        # required=True,
                         help="Name of the tracker.")
     
     args = parser.parse_args()

@@ -2,9 +2,6 @@ LICENSE
 README.rst
 setup.py
 torchreid/__init__.py
-torchreid/soccer_emb_extract_batch.py
-torchreid/soccer_emb_extract_copy.py
-torchreid/sport_emb_extract.py
 torchreid.egg-info/PKG-INFO
 torchreid.egg-info/SOURCES.txt
 torchreid.egg-info/dependency_links.txt
