@@ -2,18 +2,12 @@
 
 # from pathlib import Path
 import argparse
-import torchreid
-import sys
-# HACK: directly import util from folder path, but interferes with os.path's current path
-sys.path.append(r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\TrackLink\reid\torchreid')
-# sys.path.append('')
-from utils import FeatureExtractor
+from torchreid.utils import FeatureExtractor
 
 import os
 from tqdm import tqdm
 from loguru import logger
 from PIL import Image
-from collections import defaultdict
 
 import pickle
 import numpy as np
@@ -163,30 +157,30 @@ def main(model_path, data_path, pred_dir, tracker):
         
         # save seq_tracks into pickle file
         track_output_path = os.path.join(output_dir,  f'{seq}.pkl')
-        with open(track_output_path, 'wb') as f:
-            pickle.dump(seq_tracks, f)
+        # with open(track_output_path, 'wb') as f:          # FIXME: uncomment
+        #     pickle.dump(seq_tracks, f)
         logger.info(f"save tracklets info to {track_output_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate tracklets from tracking results.")
     parser.add_argument('--model_path',
                         type=str,
-                        default=r'C:\Users\Ciel Sun\OneDrive - UW\EE 599\TrackLink\checkpoints\sports_model.pth.tar-60',
+                        default=os.path.join('..', 'reid_checkpoints', 'sports_model.pth.tar-60'),
                         # required=True,
                         help="Path to the model file.")
     parser.add_argument('--data_path',
                         type=str,
-                        default=r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SportsMOT\dataset\test",
+                        default=r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\tracking-2023\test",
                         # required=True,
                         help="Directory containing data files.")
     parser.add_argument('--pred_dir',
                         type=str,
-                        default=r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SportsMOT\DeepEIoU_results\DeepEIoU_Baseline",
+                        default=r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\DeepEIoU_Results\DeepEIoU_Baseline",
                         # required=True,
                         help="Directory containing prediction files.")
     parser.add_argument('--tracker',
                         type=str,
-                        default='ByteTrack',
+                        default='DeepEIoU',
                         # required=True,
                         help="Name of the tracker.")
     
