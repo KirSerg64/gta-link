@@ -28,7 +28,7 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
 1. Clone the repository
 2. Create a Python environment with version 3.8
     ```bash
-    conda create -n gta_env python=3.8
+    conda create -n gta_link python=3.8
     ```
 3. Activate the environment
 
