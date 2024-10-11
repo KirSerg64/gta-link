@@ -33,7 +33,7 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
 3. Activate the environment
 
     ```bash
-    conda activate gta_env
+    conda activate gta_link
     ```
 4. Install the required packages from requirements.txt
 
