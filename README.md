@@ -39,18 +39,18 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
    ```bash
     git clone https://github.com/sjc042/gta-link
     ```
-4. Install the required packages from requirements.txt
+5. Install the required packages from requirements.txt
 
     ```bash
     pip install -r requirements.txt
     ```
 
-5. Install PyTorch (project tested on PyTorch 2.3.0 and CUDA 11.8, modify the command to match your CUDA version)
+6. Install PyTorch (project tested on PyTorch 2.3.0 and CUDA 11.8, modify the command to match your CUDA version)
     ```bash
     pip install torch torchvision torchaudio
     ```
 
-6. Install the torchreid model based on OSNet
+7. Install the torchreid model based on OSNet
     - Option 1:
     Open the reid folder and install torchreid (project tested on torchreid 1.4.0)
         ```bash
