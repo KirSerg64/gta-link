@@ -3,5 +3,6 @@
 *.jpg
 _temp
 **/__pycache__/
+*.pyc
 tools/__pycache__/*
 reid/
