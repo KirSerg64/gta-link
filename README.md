@@ -28,25 +28,28 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
 1. Clone the repository
 2. Create a Python environment with version 3.8
     ```bash
-    conda create -n gta_env python=3.8
+    conda create -n gta_link python=3.8
     ```
 3. Activate the environment
-
     ```bash
-    conda activate gta_env
+    conda activate gta_link
     ```
-4. Install the required packages from requirements.txt
-
+4. Clone the project repository:
+   ```bash
+    git clone https://github.com/sjc042/gta-link
+    cd gta-link
+    ```
+5. Install the required packages from requirements.txt
     ```bash
     pip install -r requirements.txt
     ```
 
-5. Install PyTorch (project tested on PyTorch 2.3.0 and CUDA 11.8, modify the command to match your CUDA version)
+6. Install [PyTorch](https://pytorch.org/get-started/locally/) (project tested on PyTorch 2.3.0 and CUDA 11.8, modify the command to match your CUDA version)
     ```bash
     pip install torch torchvision torchaudio
     ```
 
-6. Install the torchreid model based on OSNet
+7. Install the torchreid model based on OSNet
     - Option 1:
     Open the reid folder and install torchreid (project tested on torchreid 1.4.0)
         ```bash
