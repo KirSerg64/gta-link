@@ -2,22 +2,135 @@ import numpy as np
 import os
 import torch
 import pickle
+import random
 
 from collections import defaultdict
-
 import matplotlib.pyplot as plt
-import seaborn as sns
-
 from loguru import logger
 from tqdm import tqdm
+import concurrent.futures
 
 from sklearn.cluster import DBSCAN
 from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import cdist
 
-from Tracklet import Tracklet
+from generate_tracklets import Tracklet
 
 import argparse
+
+def detect_id_switch(embs, eps=None, min_samples=None, max_clusters=None):
+    """
+    Detects identity switches within a tracklet using clustering.
+
+    Args:
+        embs (list of numpy arrays): A list where each element is a numpy array representing an embedding.
+                                     Each embedding has the same dimensionality.
+        eps (float): The maximum distance between two samples for one to be considered as in the neighborhood of the other.
+        min_samples (int): The number of samples in a neighborhood for a point to be considered as a core point.
+
+    Returns:
+        bool: True if an identity switch is detected, otherwise False.
+    """
+    if len(embs) > 15000:
+        embs = embs[1::2]
+
+    embs = np.stack(embs)
+    
+    # Standardize the embeddings
+    scaler = StandardScaler()
+    embs_scaled = scaler.fit_transform(embs)
+
+    # Apply DBSCAN clustering
+    db = DBSCAN(eps=eps, min_samples=min_samples, metric='cosine').fit(embs_scaled)
+    labels = db.labels_
+
+    # Count the number of clusters (excluding noise)
+    unique_labels = np.unique(labels)
+    unique_labels = unique_labels[unique_labels != -1]
+
+    if -1 in labels and len(unique_labels) > 1:
+        # Find the cluster centers
+        cluster_centers = np.array([embs_scaled[labels == label].mean(axis=0) for label in unique_labels])
+        # if len(unique_labels) == 1 and unique_labels[0] == -1:      # debug line, delete later
+        #     print("Cluster centers:\n", cluster_centers)            # debug line, delete later
+        #     print("Labels:\n", labels)                              # debug line, delete later
+        # Assign noise points to the nearest cluster
+        noise_indices = np.where(labels == -1)[0]
+        for idx in noise_indices:
+            distances = cdist([embs_scaled[idx]], cluster_centers, metric='cosine')
+            nearest_cluster = np.argmin(distances)
+            labels[idx] = list(unique_labels)[nearest_cluster]
+    
+    n_clusters = len(unique_labels)
+
+    if max_clusters and n_clusters > max_clusters:
+        # Merge clusters to ensure the number of clusters does not exceed max_clusters
+        while n_clusters > max_clusters:
+            cluster_centers = np.array([embs_scaled[labels == label].mean(axis=0) for label in unique_labels])
+            distance_matrix = cdist(cluster_centers, cluster_centers, metric='cosine')
+            np.fill_diagonal(distance_matrix, np.inf)  # Ignore self-distances
+            
+            # Find the closest pair of clusters
+            min_dist_idx = np.unravel_index(np.argmin(distance_matrix), distance_matrix.shape)
+            cluster_to_merge_1, cluster_to_merge_2 = unique_labels[min_dist_idx[0]], unique_labels[min_dist_idx[1]]
+
+            # Merge the clusters
+            labels[labels == cluster_to_merge_2] = cluster_to_merge_1
+            unique_labels = np.unique(labels)
+            unique_labels = unique_labels[unique_labels != -1]
+            n_clusters = len(unique_labels)
+
+    return n_clusters > 1, labels
+
+def split_tracklets(tmp_trklets, eps=None, max_k=None, min_samples=None, len_thres=None):
+    """
+    Splits each tracklet into multiple tracklets based on an internal distance threshold.
+
+    Args:
+        tmp_trklets (dict): Dictionary of tracklets to be processed.
+        eps (float): The maximum distance between two samples for one to be considered as in the neighborhood of the other.
+        min_samples (int): The number of samples in a neighborhood for a point to be considered as a core point.
+        inner_dist_thres (float): Threshold for the average inner distance to decide splitting.
+        len_thres (int): Length threshold to filter out short tracklets.
+        max_k (int): Maximum number of clusters to consider.
+
+    Returns:
+        dict: New dictionary of tracklets after splitting.
+    """
+    new_id = max(tmp_trklets.keys()) + 1
+    tracklets = defaultdict()
+    # Splitting algorithm to process every tracklet in a sequence
+    for tid in tqdm(sorted(list(tmp_trklets.keys())), total=len(tmp_trklets), desc="Splitting tracklets"):
+        # print("Track ID:\n", tid)               # debug line, delete later
+        trklet = tmp_trklets[tid]
+        if len(trklet.times) < len_thres:  # NOTE: Set tracklet length threshold to filter out short ones
+            tracklets[tid] = trklet
+        else:
+            embs = np.stack(trklet.features)
+            frames = np.array(trklet.times)
+            bboxes = np.stack(trklet.bboxes)
+            scores = np.array(trklet.scores)
+            # Perform DBSCAN clustering
+            id_switch_detected, clusters = detect_id_switch(embs, eps=eps, min_samples=min_samples, max_clusters=max_k)
+            if not id_switch_detected:
+                tracklets[tid] = trklet
+            else:
+                unique_labels = set(clusters)
+
+                for label in unique_labels:
+                    if label == -1:
+                        continue  # Skip noise points
+                    tmp_embs = embs[clusters == label]
+                    tmp_frames = frames[clusters == label]
+                    tmp_bboxes = bboxes[clusters == label]
+                    tmp_scores = scores[clusters == label]
+                    assert new_id not in tmp_trklets
+                    # TODO: Create new tracklet object
+                    tracklets[new_id] = Tracklet(new_id, tmp_frames.tolist(), tmp_scores.tolist(), tmp_bboxes.tolist(), feats=tmp_embs.tolist())
+                    new_id += 1
+
+    assert len(tracklets) >= len(tmp_trklets)
+    return tracklets
 
 def find_consecutive_segments(track_times):
     """
@@ -156,7 +269,7 @@ def get_spatial_constraints(tid2track, factor):
 
     return x_range, y_range
 
-def display_Dist_archive(seq2Dist, seq_name = None, isMerged=False, isSplit=False):
+def display_Dist(seq2Dist, seq_name = None, isMerged=False, isSplit=False):
     """
     Displays a heatmap for the distances between tracklets for one or more sequences.
 
@@ -194,31 +307,30 @@ def display_Dist_archive(seq2Dist, seq_name = None, isMerged=False, isSplit=Fals
         plt.title(seq_name + info)
         plt.show()
 
-def display_Dist(Dist, seq_name=None, isMerged=False, isSplit=False):
-    """
-    Displays a heatmap for the distances between tracklets for one or more sequences.
+def calculate_distance(i, j, track1_id, track2_id, track1, track2, Dist):
+    if j < i:
+        return (i, j, Dist[j][i])
+    else:
+        return (i, j, get_distance(track1_id, track2_id, track1, track2))
 
-    Args:
-        seq2Dist (dict): A dictionary mapping sequence names to their corresponding distance matrices.
-        seq_name (str, optional): Specific sequence name to display the heatmap for. If None, displays for all sequences.
-        isMerged (bool): Flag indicating whether the distances are post-merge.
-        isSplit (bool): Flag indicating whether the distances are post-split.
-    """
-    split_info = " After Split" if isSplit else " Before Split"
-    merge_info = " After Merge" if isMerged else " Before Merge"
-    info = split_info + merge_info
+# Parallel get_distance_matrix function
+def get_distance_matrix_concurrent(tid2track):
+    num_tracks = len(tid2track)
+    Dist = np.zeros((num_tracks, num_tracks))
+
     
-    plt.figure(figsize=(10, 8))  # Optional: adjust the size of the heatmap
 
-    # Plot the heatmap
-    sns.heatmap(Dist, cmap='Blues')
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+        for i, (track1_id, track1) in enumerate(tid2track.items()):
+            for j, (track2_id, track2) in enumerate(tid2track.items()):
+                futures.append(executor.submit(calculate_distance, i, j, track1_id, track2_id, track1, track2, Dist))
 
-    plt.title(f"{seq_name}{info}")
-    plt.show()
-    # plt.imshow(Dist, cmap='bone')
-    # plt.colorbar()
-    # plt.title(seq_name + info)
-    # plt.show()
+        for future in concurrent.futures.as_completed(futures):
+            i, j, distance = future.result()
+            Dist[i][j] = distance
+
+    return Dist
 
 def get_distance_matrix(tid2track):
     """
@@ -313,9 +425,7 @@ def check_spatial_constraints(trk_1, trk_2, max_x_range, max_y_range):
     subtracks = query_subtracks(seg_1, seg_2, trk_1, trk_2)
     # assert(len(subtracks) > 1)                    # debug line, delete later
     subtrack_1st = subtracks.pop(0)
-    # print("Entering while loop")
     while subtracks:
-        # print("Subtracks remaining: ", len(subtracks))
         subtrack_2nd = subtracks.pop(0)
         if subtrack_1st.parent_id == subtrack_2nd.parent_id:
             subtrack_1st = subtrack_2nd
@@ -328,7 +438,6 @@ def check_spatial_constraints(trk_1, trk_2, max_x_range, max_y_range):
         y_2 += h_2 / 2
         dx = abs(x_1 - x_2)
         dy = abs(y_1 - y_2)
-        
         # check the distance between exit location of track_1 and enter location of track_2
         if dx > max_x_range or dy > max_y_range:
             inSpatialRange = False
@@ -336,256 +445,90 @@ def check_spatial_constraints(trk_1, trk_2, max_x_range, max_y_range):
             break
         else:
             subtrack_1st = subtrack_2nd
-    # print("Exit while loop")
     return inSpatialRange
 
-def merge_tracklets_archive(tracklets, seq2Dist, Dist, seq_name=None, max_x_range=None, max_y_range=None, merge_dist_thres=None):
-    seq2Dist[seq_name] = Dist                               # save all seqs distance matrix, debug line, delete later
-    # displayDist(seq2Dist, seq_name, isMerged=False, isSplit=True)         # used to display Dist, debug line, delete later=
-
-    idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
+def merge_tracklets_batched(tracklets, seq2Dist, batch_size=50, seq_name=None, max_x_range=None, max_y_range=None, merge_dist_thres=None):
+    """
+    Merges tracklets in batches based on a distance threshold.
     
-    # Hierarchical Clustering
-    # While there are still values (exclude diagonal) in distance matrix lower than merging distance threshold
-    #   Step 1: find minimal distance for tracklet pair
-    #   Step 2: merge tracklet pair
-    #   Step 3: update distance matrix
+    Parameters:
+    tracklets (dict): A dictionary of tracklets where keys are tracklet IDs and values are tracklet objects.
+    seq2Dist (dict): A dictionary to store distance matrices for sequences.
+    batch_size (int): The size of the batches to process at a time.
+    seq_name (str): The name of the sequence being processed.
+    max_x_range (float): Maximum allowed distance in the x direction for merging.
+    max_y_range (float): Maximum allowed distance in the y direction for merging.
+    merge_dist_thres (float): Distance threshold below which tracklets should be merged.
+    
+    Returns:
+    dict: The merged tracklets.
+    """
+    # seq2Dist[seq_name] = Dist                               # save all seqs distance matrix, debug line, delete later
+
+    temp_tracklets = {}
+    tracklet_items = list(tracklets.items())
+
+    # Shuffle tracklet_items with a fixed random seed
+    # random.seed(42)
+    # random.shuffle(tracklet_items)
+
+    # Batched clustering
+    # For batch the tracklets into groups of batch_size (last batch could be less than specified batch size):
+    #   get batch_Dist with batch_Dist = get_distance_matrix(batched tracklets)
+    #   while (np.any(batch_Dist[non_diagonal_mask] < merge_dist_thres)): keep merging
+    #   save merged batched tracklets to temp_tracklets
+    # After processing all batches, merge all tracklets in temp_tracklets with while (np.any(Dist[non_diagonal_mask] < merge_dist_thres))
+    print(f"Batch size: {batch_size}")
+    for i in range(0, len(tracklet_items), batch_size):
+        batch_tracklets = dict(tracklet_items[i:i+batch_size])
+        print(f"Processing batch from index {i} to {min(i+batch_size - 1, len(tracklet_items) - 1)}")
+        
+        merged_batch_tracklets= merge_tracklets(batch_tracklets, merge_dist_thres, max_x_range, max_y_range)
+        print(f"{len(merged_batch_tracklets)} of {batch_size} tracklets left after merging.")
+        temp_tracklets.update(merged_batch_tracklets)
+    print(f"Merging {len(temp_tracklets)} tracklets after batched processing.")
+    print()
+    merged_tracklets = merge_tracklets(temp_tracklets, merge_dist_thres, max_x_range, max_y_range)
+    
+    return merged_tracklets
+    
+
+def merge_tracklets(tracklets, merge_dist_thres, max_x_range, max_y_range):
+    Dist = get_distance_matrix(tracklets)
     diagonal_mask = np.eye(Dist.shape[0], dtype=bool)
     non_diagonal_mask = ~diagonal_mask
-    # print("Enter merge while loop")
-    while (np.any(Dist[non_diagonal_mask] < merge_dist_thres)):
-        # print(np.sum(np.any(Dist[non_diagonal_mask] < merge_dist_thres)))
-        # Get the indices of the minimum value considering the mask
-        min_index = np.argmin(Dist[non_diagonal_mask])
-        min_value = np.min(Dist[non_diagonal_mask])
-        # Translate this index to the original array's indices
-        masked_indices = np.where(non_diagonal_mask)
-        track1_idx, track2_idx = masked_indices[0][min_index], masked_indices[1][min_index]
-        # print("Tracks to merge:", track1_idx, track2_idx)
-        # print(f"Minimum value in masked Dist: {min_value}")
-        # print(f"Corresponding value in Dist using recalculated indices: {Dist[track1_idx, track2_idx]}")
-
-        assert min_value == Dist[track1_idx, track2_idx], "Values should match!"
-
-        track1 = tracklets[idx2tid[track1_idx]]
-        track2 = tracklets[idx2tid[track2_idx]]
-
-        inSpatialRange = check_spatial_constraints(track1, track2, max_x_range, max_y_range)
-        # inSpatialRange = True
-        # print("In spatial range:", inSpatialRange)
-        if inSpatialRange:
-            track1.features += track2.features      # Note: currently we merge track 2 to track 1 without creating a new track
-            track1.times += track2.times
-            track1.bboxes += track2.bboxes
-
-            # update tracklets dictionary
-            tracklets[idx2tid[track1_idx]] = track1
-            tracklets.pop(idx2tid[track2_idx])
-
-            # TODO: instead of calculate the whole matrix, just update the row/column with merged tracklets and copy unaffected tacklet values
-            # update distance matrix
-            Dist = get_distance_matrix(tracklets)
-            seq2Dist[seq_name] = Dist                   # used to display Dist debug line, delete later
-            # update idx2tid
-            idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
-            # update mask
-            diagonal_mask = np.eye(Dist.shape[0], dtype=bool)
-            non_diagonal_mask = ~diagonal_mask
-        else:
-            # change distance between track pair to threshold
-            Dist[track1_idx, track2_idx], Dist[track2_idx, track1_idx] = merge_dist_thres, merge_dist_thres
-    # print("Finish merge while loop")
-    return tracklets
-
-def merge_tracklets(tracklets, seq2Dist, Dist, seq_name=None, max_x_range=None, max_y_range=None, merge_dist_thres=None):
-    seq2Dist[seq_name] = Dist                               # save all seqs distance matrix, debug line, delete later
-    # displayDist(seq2Dist, seq_name, isMerged=False, isSplit=True)         # used to display Dist, debug line, delete later=
-
     idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
-    
-    # Hierarchical Clustering
-    # While there are still values (exclude diagonal) in distance matrix lower than merging distance threshold
-    #   Step 1: find minimal distance for tracklet pair
-    #   Step 2: merge tracklet pair
-    #   Step 3: update distance matrix
-    diagonal_mask = np.eye(Dist.shape[0], dtype=bool)
-    non_diagonal_mask = ~diagonal_mask
-    # print("Enter merge while loop")
-    while (np.any(Dist[non_diagonal_mask] < merge_dist_thres)):
-        # print(np.sum(np.any(Dist[non_diagonal_mask] < merge_dist_thres)))
-        # Get the indices of the minimum value considering the mask
-        min_index = np.argmin(Dist[non_diagonal_mask])
-        min_value = np.min(Dist[non_diagonal_mask])
-        # Translate this index to the original array's indices
-        masked_indices = np.where(non_diagonal_mask)
-        track1_idx, track2_idx = masked_indices[0][min_index], masked_indices[1][min_index]
-        # print("Tracks idx to merge:", track1_idx, track2_idx)
-        # print(f"Minimum value in masked Dist: {min_value}")
-        # print(f"Corresponding value in Dist using recalculated indices: {Dist[track1_idx, track2_idx]}")
 
-        assert min_value == Dist[track1_idx, track2_idx], "Values should match!"
+    while np.any(Dist[non_diagonal_mask] < merge_dist_thres):
+            min_index = np.argmin(Dist[non_diagonal_mask])
+            min_value = np.min(Dist[non_diagonal_mask])
 
-        track1 = tracklets[idx2tid[track1_idx]]
-        track2 = tracklets[idx2tid[track2_idx]]
+            masked_indices = np.where(non_diagonal_mask)
+            track1_idx, track2_idx = masked_indices[0][min_index], masked_indices[1][min_index]
 
-        inSpatialRange = check_spatial_constraints(track1, track2, max_x_range, max_y_range)
-        # inSpatialRange = True
-        # print("In spatial range:", inSpatialRange)
-        if inSpatialRange:
-            track1.features += track2.features      # Note: currently we merge track 2 to track 1 without creating a new track
-            track1.times += track2.times
-            track1.bboxes += track2.bboxes
+            assert min_value == Dist[track1_idx, track2_idx], "Values should match!"
 
-            # update tracklets dictionary
-            tracklets[idx2tid[track1_idx]] = track1
-            tracklets.pop(idx2tid[track2_idx])
+            track1 = tracklets[idx2tid[track1_idx]]
+            track2 = tracklets[idx2tid[track2_idx]]
 
-            # Remove the merged tracklet (track2) from the distance matrix
-            Dist = np.delete(Dist, track2_idx, axis=0)  # Remove row for track2
-            Dist = np.delete(Dist, track2_idx, axis=1)  # Remove column for track2
-            # update idx2tid
-            idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
-            # instead of calculate the whole matrix, just update the row/column with merged tracklets and copy unaffected tacklet values
-            # Update distance matrix only for the merged tracklet's row and column
-            for idx in range(Dist.shape[0]):
-                # if idx != track1_idx:  # Don't update distance to itself
-                Dist[track1_idx, idx] = get_distance(idx2tid[track1_idx], idx2tid[idx], tracklets[idx2tid[track1_idx]], tracklets[idx2tid[idx]])
-                Dist[idx, track1_idx] = Dist[track1_idx, idx]  # Ensure symmetry
-            # TODO: check Dist is the same as get_distance_matrix(tracklets)
-            # Debugging: Check if the updated Dist is the same as recalculating from scratch
-            # full_recalculated_Dist = get_distance_matrix(tracklets)# Check where the matrices differ
-            # if not np.allclose(Dist, full_recalculated_Dist):
-            #     print("Differences found between updated and recalculated matrices!")
-            #     diff_indices = np.argwhere(~np.isclose(Dist, full_recalculated_Dist))
-
-            #     for row, col in diff_indices:
-            #         print(f"Difference at row {row}, column {col}: Updated = {Dist[row, col]}, Recalculated = {full_recalculated_Dist[row, col]}")
-            # assert np.allclose(Dist, full_recalculated_Dist), "Mismatch between updated and recalculated distance matrices!"
-
-            seq2Dist[seq_name] = Dist                   # used to display Dist debug line, delete later
-            
-            # update mask
-            diagonal_mask = np.eye(Dist.shape[0], dtype=bool)
-            non_diagonal_mask = ~diagonal_mask
-        else:
-            # change distance between track pair to threshold
-            Dist[track1_idx, track2_idx], Dist[track2_idx, track1_idx] = merge_dist_thres, merge_dist_thres
-    # print("Finish merge while loop")
-    return tracklets
-
-def detect_id_switch(embs, eps=None, min_samples=None, max_clusters=None):
-    """
-    Detects identity switches within a tracklet using clustering.
-
-    Args:
-        embs (list of numpy arrays): A list where each element is a numpy array representing an embedding.
-                                     Each embedding has the same dimensionality.
-        eps (float): The maximum distance between two samples for one to be considered as in the neighborhood of the other.
-        min_samples (int): The number of samples in a neighborhood for a point to be considered as a core point.
-
-    Returns:
-        bool: True if an identity switch is detected, otherwise False.
-    """
-    if len(embs) > 15000:
-        embs = embs[1::2]
-
-    embs = np.stack(embs)
-    
-    # Standardize the embeddings
-    scaler = StandardScaler()
-    embs_scaled = scaler.fit_transform(embs)
-
-    # Apply DBSCAN clustering
-    db = DBSCAN(eps=eps, min_samples=min_samples, metric='cosine').fit(embs_scaled)
-    labels = db.labels_
-
-    # Count the number of clusters (excluding noise)
-    unique_labels = np.unique(labels)
-    unique_labels = unique_labels[unique_labels != -1]
-
-    if -1 in labels and len(unique_labels) > 1:
-        # Find the cluster centers
-        cluster_centers = np.array([embs_scaled[labels == label].mean(axis=0) for label in unique_labels])
-        # if len(unique_labels) == 1 and unique_labels[0] == -1:      # debug line, delete later
-        #     print("Cluster centers:\n", cluster_centers)            # debug line, delete later
-        #     print("Labels:\n", labels)                              # debug line, delete later
-        # Assign noise points to the nearest cluster
-        noise_indices = np.where(labels == -1)[0]
-        for idx in noise_indices:
-            distances = cdist([embs_scaled[idx]], cluster_centers, metric='cosine')
-            nearest_cluster = np.argmin(distances)
-            labels[idx] = list(unique_labels)[nearest_cluster]
-    
-    n_clusters = len(unique_labels)
-
-    if max_clusters and n_clusters > max_clusters:
-        # Merge clusters to ensure the number of clusters does not exceed max_clusters
-        while n_clusters > max_clusters:
-            cluster_centers = np.array([embs_scaled[labels == label].mean(axis=0) for label in unique_labels])
-            distance_matrix = cdist(cluster_centers, cluster_centers, metric='cosine')
-            np.fill_diagonal(distance_matrix, np.inf)  # Ignore self-distances
-            
-            # Find the closest pair of clusters
-            min_dist_idx = np.unravel_index(np.argmin(distance_matrix), distance_matrix.shape)
-            cluster_to_merge_1, cluster_to_merge_2 = unique_labels[min_dist_idx[0]], unique_labels[min_dist_idx[1]]
-
-            # Merge the clusters
-            labels[labels == cluster_to_merge_2] = cluster_to_merge_1
-            unique_labels = np.unique(labels)
-            unique_labels = unique_labels[unique_labels != -1]
-            n_clusters = len(unique_labels)
-
-    return n_clusters > 1, labels
-
-def split_tracklets(tmp_trklets, eps=None, max_k=None, min_samples=None, len_thres=None):
-    """
-    Splits each tracklet into multiple tracklets based on an internal distance threshold.
-
-    Args:
-        tmp_trklets (dict): Dictionary of tracklets to be processed.
-        eps (float): The maximum distance between two samples for one to be considered as in the neighborhood of the other.
-        min_samples (int): The number of samples in a neighborhood for a point to be considered as a core point.
-        len_thres (int): Length threshold to filter out short tracklets.
-        max_k (int): Maximum number of clusters to consider.
-
-    Returns:
-        dict: New dictionary of tracklets after splitting.
-    """
-    new_id = max(tmp_trklets.keys()) + 1
-    tracklets = defaultdict()
-    # Splitting algorithm to process every tracklet in a sequence
-    for tid in tqdm(sorted(list(tmp_trklets.keys())), total=len(tmp_trklets), desc="Splitting tracklets"):
-        # print("Track ID:\n", tid)               # debug line, delete later
-        trklet = tmp_trklets[tid]
-        if len(trklet.times) < len_thres:  # NOTE: Set tracklet length threshold to filter out short ones
-            tracklets[tid] = trklet
-        else:
-            embs = np.stack(trklet.features)
-            frames = np.array(trklet.times)
-            bboxes = np.stack(trklet.bboxes)
-            scores = np.array(trklet.scores)
-            # Perform DBSCAN clustering
-            id_switch_detected, clusters = detect_id_switch(embs, eps=eps, min_samples=min_samples, max_clusters=max_k)
-            if not id_switch_detected:
-                tracklets[tid] = trklet
+            if not (set(track1.times) & set(track2.times)):
+                inSpatialRange = check_spatial_constraints(track1, track2, max_x_range, max_y_range)
             else:
-                unique_labels = set(clusters)
+                inSpatialRange = False
 
-                for label in unique_labels:
-                    if label == -1:
-                        continue  # Skip noise points
-                    tmp_embs = embs[clusters == label]
-                    tmp_frames = frames[clusters == label]
-                    tmp_bboxes = bboxes[clusters == label]
-                    tmp_scores = scores[clusters == label]
-                    assert new_id not in tmp_trklets
-                    
-                    tracklets[new_id] = Tracklet(new_id, tmp_frames.tolist(), tmp_scores.tolist(), tmp_bboxes.tolist(), feats=tmp_embs.tolist())
-                    new_id += 1
+            if inSpatialRange:
+                track1.features += track2.features
+                track1.times += track2.times
+                track1.bboxes += track2.bboxes
 
-    assert len(tracklets) >= len(tmp_trklets)
+                tracklets[idx2tid[track1_idx]] = track1
+                tracklets.pop(idx2tid[track2_idx])
+
+                Dist = get_distance_matrix(tracklets)
+                idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
+                diagonal_mask = np.eye(Dist.shape[0], dtype=bool)
+                non_diagonal_mask = ~diagonal_mask
     return tracklets
-
 
 def save_results(sct_output_path, tracklets):
     """
@@ -598,7 +541,7 @@ def save_results(sct_output_path, tracklets):
     """
     results = []
     for track_id, track in tracklets.items(): # add each track to results
-        tid = track.track_id
+        tid = track.track_id     # Note: it's the same as track_id
         for instance_idx, frame_id in enumerate(track.times):
             bbox = track.bboxes[instance_idx]
             
@@ -631,7 +574,7 @@ def parse_args():
     
     parser.add_argument('--track_src',
                         type=str,
-                        default=r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SoccerNet\SORT_results\SORT_Tracklets_test",
+                        default=r"C:\Users\Ciel Sun\OneDrive - UW\EE 599\SportsMOT\DeepEIoU_results\DeepEIoU_Tracklets_test",
                         required=True,
                         help='Source directory of tracklet pkl files.'
                         )
@@ -648,6 +591,7 @@ def parse_args():
     parser.add_argument('--eps',
                         type=float,
                         default=0.7,
+                        required=True,
                         help='For DBSCAN clustering, the maximum distance between two samples for one to be considered as in the neighborhood of the other.')
     
     parser.add_argument('--min_samples',
@@ -666,12 +610,13 @@ def parse_args():
     
     parser.add_argument('--spatial_factor',
                         type=float,
-                        default=1,
+                        default=1.0,
                         help='Factor to adjust spatial distances.')
     
     parser.add_argument('--merge_dist_thres',
                         type=float,
                         default=0.4,
+                        required=True,
                         help='Minimum cosine distance between two tracklets for merging.')
     return parser.parse_args()
 
@@ -697,11 +642,11 @@ def main():
     seqs_tracks.sort()
     seq2Dist = dict()
 
-    process_limit = 10000                          # debug line, delete later
+    process_limit = 10000                           # debug line, delete later
     for seq_idx, seq in enumerate(seqs_tracks):
         if seq_idx >= process_limit:            # debug line, delete later
             break                               # debug line, delete later
-        # if seq_idx != 2: continue                                          # debug line, delete later
+        # if seq_idx+1 != 1: continue                                          # debug line, delete later
         # print("Seq name:\n", seq)                                           # debug line, delete later
         seq_name = seq.split('.')[0]
         logger.info(f"Processing seq {seq_idx+1} / {len(seqs_tracks)}")
@@ -710,9 +655,9 @@ def main():
 
         max_x_range, max_y_range = get_spatial_constraints(tmp_trklets, args.spatial_factor)
         
-        # Dist = get_distance_matrix(tmp_trklets)
+        # Dist = getDistanceMap(tmp_trklets)
         # seq2Dist[seq_name] = Dist                                              # save all seqs distance matrix, debug line, delete later
-        # display_Dist(Dist, seq_name, isMerged=False, isSplit=False)         # used to display Dist, debug line, delete later
+        # displayDist(seq2Dist, seq_name, isMerged=False, isSplit=False)         # used to display Dist, debug line, delete later
 
         if args.use_split:
             print(f"----------------Number of tracklets before splitting: {len(tmp_trklets)}----------------")
@@ -720,15 +665,15 @@ def main():
         else:
             splitTracklets = tmp_trklets
         
-        Dist = get_distance_matrix(splitTracklets)
-        # display_Dist(Dist, seq_name, isMerged=False, isSplit=True)
+        # Dist = get_distance_matrix(splitTracklets)
+        # Dist = get_distance_matrix_concurrent(splitTracklets)
+
         print(f"----------------Number of tracklets before merging: {len(splitTracklets)}----------------")
         
-        mergedTracklets = merge_tracklets(splitTracklets, seq2Dist, Dist, seq_name=seq_name, max_x_range=max_x_range, max_y_range=max_y_range, merge_dist_thres=args.merge_dist_thres)
-        # Dist = get_distance_matrix(mergedTracklets)
-        # display_Dist(Dist, seq_name, isMerged=True, isSplit=True)
-        print(f"----------------Number of tracklets after merging: {len(mergedTracklets)}----------------")
+        mergedTracklets = merge_tracklets_batched(splitTracklets, seq2Dist, batch_size=50, seq_name=seq_name, max_x_range=max_x_range, max_y_range=max_y_range, merge_dist_thres=args.merge_dist_thres)
 
+        print(f"----------------Number of tracklets after merging: {len(mergedTracklets)}----------------")
+        
         sct_name = f'{tracker}_{dataset}_{process}_eps{args.eps}_minSamples{args.min_samples}_K{args.max_k}_mergeDist{args.merge_dist_thres}_spatial{args.spatial_factor}'
         os.makedirs(os.path.join(data_path, sct_name), exist_ok=True)
         new_sct_output_path = os.path.join(data_path, sct_name, '{}.txt'.format(seq_name))
