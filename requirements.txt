@@ -21,3 +21,4 @@ chardet
 tabulate
 pycocotools
 thop
+seaborn
