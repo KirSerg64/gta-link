@@ -37,11 +37,10 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
 4. Clone the project repository:
    ```bash
     git clone https://github.com/sjc042/gta-link
+    cd gta-link
     ```
 5. Install the required packages from requirements.txt
-
     ```bash
-    cd gta-link
     pip install -r requirements.txt
     ```
 
