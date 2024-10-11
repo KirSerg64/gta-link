@@ -56,7 +56,7 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
     - Option 2:
     In project folder, creat folder 'reid', then clone torchreid repository to local machine for the newest version of torchreid
         ```bash
-        cd track-link
+        cd gta-link
         mkdir reid
         git clone https://github.com/KaiyangZhou/deep-person-reid.git
         ```
@@ -80,7 +80,7 @@ Make sure to replace placeholders (e.g., `{}`) with actual values when running t
     - `--pred_dir`: Specify directory of tracking results txt files.
     - `--tracker`: Indicate tracker's name for file saving.
 
-2. Refine tracklets:
+2. Refine tracklets (in project root directory):
     ```bash
     python refine_tracklets.py --dataset {dataset name}
                      --tracker {tracker name}
