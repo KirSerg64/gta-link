@@ -28,7 +28,7 @@ class Tracklet:
             feats (list of np.array, optional): Feature vectors corresponding to frames. Each feature should be a numpy array of shape (512,). Defaults to None.
         '''
         self.track_id = track_id
-        self.parent_id = None
+        self.parent_id = track_id
         self.scores = scores if isinstance(scores, list) else [scores] if scores is not None else []
         self.times = frames if isinstance(frames, list) else [frames] if frames is not None else []
         self.bboxes = bboxes if isinstance(bboxes, list) and bboxes and isinstance(bboxes[0], list) else [bboxes] if bboxes is not None else []
