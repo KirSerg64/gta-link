@@ -44,7 +44,7 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
     pip install -r requirements.txt
     ```
 
-6. Install PyTorch (project tested on PyTorch 2.3.0 and CUDA 11.8, modify the command to match your CUDA version)
+6. Install [PyTorch](https://pytorch.org/get-started/locally/) (project tested on PyTorch 2.3.0 and CUDA 11.8, modify the command to match your CUDA version)
     ```bash
     pip install torch torchvision torchaudio
     ```
