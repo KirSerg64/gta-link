@@ -31,7 +31,6 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
     conda create -n gta_link python=3.8
     ```
 3. Activate the environment
-
     ```bash
     conda activate gta_link
     ```
@@ -42,6 +41,7 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
 5. Install the required packages from requirements.txt
 
     ```bash
+    cd gta-link
     pip install -r requirements.txt
     ```
 
