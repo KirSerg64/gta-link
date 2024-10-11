@@ -64,7 +64,13 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
         git clone https://github.com/KaiyangZhou/deep-person-reid.git
         ```
 
-Here is the refined instructions section with the correct syntax for running the scripts:
+
+## Prepare Dataset
+1. To download SoccerNet tracking 2023, follow this [link](https://github.com/SoccerNet/sn-tracking?tab=readme-ov-file).
+2. To download SportsMOT dataset, follow this [link](https://github.com/MCG-NJU/SportsMOT)
+
+* Note: tracking data annotation format is in MOT and dataset organization is MOT 17 challenge.
+
 
 ## Instructions for Running
 NOTE:
@@ -72,7 +78,6 @@ Make sure to replace placeholders (e.g., `{}`) with actual values when running t
 
 1. Generate tracklets with your own tracking results:
     ```bash
-    cd tools
     python generate_tracklets.py --model_path {reid model weight}
                                  --data_path {dataset directory}
                                  --pred_dir {tracking results direcotry}
