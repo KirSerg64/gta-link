@@ -27,19 +27,18 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
 
 ## Installation
 
-1. Clone the repository
-2. Create a Python environment with version 3.8
-    ```bash
-    conda create -n gta_link python=3.8
-    ```
-3. Activate the environment
-    ```bash
-    conda activate gta_link
-    ```
-4. Clone the project repository:
+1. Clone the project repository:
    ```bash
     git clone https://github.com/sjc042/gta-link
     cd gta-link
+    ```
+3. Create a Python environment with version 3.8
+    ```bash
+    conda create -n gta_link python=3.8
+    ```
+4. Activate the environment
+    ```bash
+    conda activate gta_link
     ```
 5. Install the required packages from requirements.txt
     ```bash
@@ -71,7 +70,7 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
 1. To download SoccerNet tracking 2023, follow this [link](https://github.com/SoccerNet/sn-tracking?tab=readme-ov-file).
 2. To download SportsMOT dataset, follow this [link](https://github.com/MCG-NJU/SportsMOT)
 
-* Note: tracking data annotation format is in MOT and dataset organization is MOT 17 challenge.
+* Note: tracking data annotation format is in MOT and dataset organization follows MOT 17 challenge.
 
 
 ## Instructions for Running
