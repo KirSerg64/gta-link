@@ -90,8 +90,8 @@ def main(model_path, data_path, pred_dir, tracker):
         
         # save seq_tracks into pickle file
         track_output_path = os.path.join(output_dir,  f'{seq}.pkl')
-        # with open(track_output_path, 'wb') as f:
-        #     pickle.dump(seq_tracks, f)
+        with open(track_output_path, 'wb') as f:
+            pickle.dump(seq_tracks, f)
         logger.info(f"save tracklets info to {track_output_path}")
 
 if __name__ == "__main__":
