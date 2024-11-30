@@ -2,9 +2,20 @@
 
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/gta-global-tracklet-association-for-multi/multi-object-tracking-on-sportsmot)](https://paperswithcode.com/sota/multi-object-tracking-on-sportsmot?p=gta-global-tracklet-association-for-multi)
 
+## Results on Datasets
+
+<img src="images/HOTA_comparison_scatter_final.png" alt="Performance Comparison" width="400">
+
+## Demo
+
+
 ## Introduction
 
 This project introduces a universal, model-agnostic method designed to refine and enhance tracklet association for single-camera Multi-Object Tracking ([MOT](https://motchallenge.net/)). The method is primarily developed for datasets such as [SportsMOT](https://github.com/MCG-NJU/SportsMOT) or [SoccerNet](https://github.com/SoccerNet/sn-tracking) but is also applicable to any MOT datasets. The approach is developed as an offline post-processing tool.
+
+🎉 Our work is accepted by [ACCV 2024 MLCS Workshop](https://accv-mlcsa-2024.sunyai.com/index.html).
+
+📄 Read the paper on [arXiv](https://arxiv.org/abs/2411.08216).
 <!-- TODO: add results on datasets -->
 
 ## Methodology
@@ -86,8 +97,25 @@ Make sure to replace placeholders (e.g., `{}`) with actual values when running t
     ```
     - `--model_path`: Specify the path to reid model's checkpoint file (default is `../reid_checkpoints/sports_model.pth.tar-60`)
     - `--data_path`: Specify directory of dataset's split data (e.g. `SoccerNet/tracking-2023/test`).
-    - `--pred_dir`: Specify directory of tracking results txt files.
+    - `--pred_dir`: Specify the directory containing the tracking results `.txt` files. The files should be organized as shown below:
+
+        ```
+        pred_dir (e.g., DeepEIoU_Baseline)
+        ├── seq1.txt
+        ├── seq2.txt
+        ├── ...
+        ```
     - `--tracker`: Indicate tracker's name for file saving.
+    - Note: a video sequence's tracklets will be saved as  `.pkl` files in diretory parallel to `pred_dir` e.g.:
+    
+        ```
+        ├──pred_dir (e.g., DeepEIoU_Baseline)
+
+        ├──DeepEIoU_Tracklets_test
+            ├── seq1.pkl
+            ├── seq2.pkl
+            ├── ...
+        ```
 
 2. Refine tracklets (in project root directory):
     ```bash
