@@ -24,7 +24,6 @@ def main(model_path, data_path, pred_dir, tracker):
         ])
 
     split = os.path.basename(data_path)
-    # TODO: handle error cases if files/dirs not found
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     extractor = FeatureExtractor(
