@@ -68,8 +68,6 @@ def query_subtracks(seg1, seg2, track1, track2):
             continue
         '''
 
-        # subtrack_1 = get_subtrack(track1, s1_start, s1_end)  # Extract subtrack from track 1
-        # subtrack_2 = get_subtrack(track2, s2_start, s2_end)  # Extract subtrack from track 2
         subtrack_1 = track1.extract(s1_start, s1_end)
         subtrack_2 = track2.extract(s2_start, s2_end)
 
@@ -97,7 +95,6 @@ def query_subtracks(seg1, seg2, track1, track2):
         if(s_end - s_start) < 30:
             seg_remain.pop(0)
             continue
-        # subtracks.append(get_subtrack(track_remain, s_start, s_end))
         subtracks.append(track_remain.extract(s_start, s_end))
         seg_remain.pop(0)
     
@@ -156,44 +153,6 @@ def get_spatial_constraints(tid2track, factor):
 
     return x_range, y_range
 
-def display_Dist_archive(seq2Dist, seq_name = None, isMerged=False, isSplit=False):
-    """
-    Displays a heatmap for the distances between tracklets for one or more sequences.
-
-    Args:
-        seq2Dist (dict): A dictionary mapping sequence names to their corresponding distance matrices.
-        seq_name (str, optional): Specific sequence name to display the heatmap for. If None, displays for all sequences.
-        isMerged (bool): Flag indicating whether the distances are post-merge.
-        isSplit (bool): Flag indicating whether the distances are post-split.
-
-    """
-    split_info = " After Split" if isSplit else " Before Split"
-    merge_info = " After Merge" if isMerged else " Before Merge"
-    info = split_info + merge_info
-    if seq_name is None:          # Display all sequences' distance maps if no sequence is specified
-        seqs = list(seq2Dist.keys())
-        for i in range(len(seqs)):
-            seq = seqs[i]
-            Dist = seq2Dist[seq]
-            # fig, ax = plt.subplots()
-            # ticks = np.arange(len(Dist))
-            # im, cbar = heatmap(Dist, ticks, ticks, ax=ax, cmap='binary', cbarlabel='distance')
-            # texts = annotate_heatmap(im, valfmt="{x:.2f}")
-            # fig.tight_layout()
-            # plt.show()
-
-            plt.imshow(Dist, cmap='binary')
-            plt.colorbar()
-            plt.title(seq + info)
-            plt.show()
-    else:
-        assert seq_name in set(seq2Dist.keys())
-        Dist = seq2Dist[seq_name]
-        plt.imshow(Dist, cmap='binary')
-        plt.colorbar()
-        plt.title(seq_name + info)
-        plt.show()
-
 def display_Dist(Dist, seq_name=None, isMerged=False, isSplit=False):
     """
     Displays a heatmap for the distances between tracklets for one or more sequences.
@@ -215,10 +174,6 @@ def display_Dist(Dist, seq_name=None, isMerged=False, isSplit=False):
 
     plt.title(f"{seq_name}{info}")
     plt.show()
-    # plt.imshow(Dist, cmap='bone')
-    # plt.colorbar()
-    # plt.title(seq_name + info)
-    # plt.show()
 
 def get_distance_matrix(tid2track):
     """
@@ -256,11 +211,6 @@ def get_distance(track1_id, track2_id, track1, track2):
         float: Cosine distance between the two tracks.
     """
     assert track1_id == track1.track_id and track2_id == track2.track_id   # debug line
-    # doesOverlap = (track1_id != track2_id)
-    # if doesOverlap:
-    #     track1_times = set(track1.times)
-    #     track2_times = set(track2.times)
-    #     doesOverlap = len(track1_times.intersection(track2_times)) > 0
     doesOverlap = False
     if (track1_id != track2_id):
         doesOverlap = set(track1.times) & set(track2.times)
@@ -339,64 +289,6 @@ def check_spatial_constraints(trk_1, trk_2, max_x_range, max_y_range):
     # print("Exit while loop")
     return inSpatialRange
 
-def merge_tracklets_archive(tracklets, seq2Dist, Dist, seq_name=None, max_x_range=None, max_y_range=None, merge_dist_thres=None):
-    seq2Dist[seq_name] = Dist                               # save all seqs distance matrix, debug line, delete later
-    # displayDist(seq2Dist, seq_name, isMerged=False, isSplit=True)         # used to display Dist, debug line, delete later=
-
-    idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
-    
-    # Hierarchical Clustering
-    # While there are still values (exclude diagonal) in distance matrix lower than merging distance threshold
-    #   Step 1: find minimal distance for tracklet pair
-    #   Step 2: merge tracklet pair
-    #   Step 3: update distance matrix
-    diagonal_mask = np.eye(Dist.shape[0], dtype=bool)
-    non_diagonal_mask = ~diagonal_mask
-    # print("Enter merge while loop")
-    while (np.any(Dist[non_diagonal_mask] < merge_dist_thres)):
-        # print(np.sum(np.any(Dist[non_diagonal_mask] < merge_dist_thres)))
-        # Get the indices of the minimum value considering the mask
-        min_index = np.argmin(Dist[non_diagonal_mask])
-        min_value = np.min(Dist[non_diagonal_mask])
-        # Translate this index to the original array's indices
-        masked_indices = np.where(non_diagonal_mask)
-        track1_idx, track2_idx = masked_indices[0][min_index], masked_indices[1][min_index]
-        # print("Tracks to merge:", track1_idx, track2_idx)
-        # print(f"Minimum value in masked Dist: {min_value}")
-        # print(f"Corresponding value in Dist using recalculated indices: {Dist[track1_idx, track2_idx]}")
-
-        assert min_value == Dist[track1_idx, track2_idx], "Values should match!"
-
-        track1 = tracklets[idx2tid[track1_idx]]
-        track2 = tracklets[idx2tid[track2_idx]]
-
-        inSpatialRange = check_spatial_constraints(track1, track2, max_x_range, max_y_range)
-        # inSpatialRange = True
-        # print("In spatial range:", inSpatialRange)
-        if inSpatialRange:
-            track1.features += track2.features      # Note: currently we merge track 2 to track 1 without creating a new track
-            track1.times += track2.times
-            track1.bboxes += track2.bboxes
-
-            # update tracklets dictionary
-            tracklets[idx2tid[track1_idx]] = track1
-            tracklets.pop(idx2tid[track2_idx])
-
-            # TODO: instead of calculate the whole matrix, just update the row/column with merged tracklets and copy unaffected tacklet values
-            # update distance matrix
-            Dist = get_distance_matrix(tracklets)
-            seq2Dist[seq_name] = Dist                   # used to display Dist debug line, delete later
-            # update idx2tid
-            idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
-            # update mask
-            diagonal_mask = np.eye(Dist.shape[0], dtype=bool)
-            non_diagonal_mask = ~diagonal_mask
-        else:
-            # change distance between track pair to threshold
-            Dist[track1_idx, track2_idx], Dist[track2_idx, track1_idx] = merge_dist_thres, merge_dist_thres
-    # print("Finish merge while loop")
-    return tracklets
-
 def merge_tracklets(tracklets, seq2Dist, Dist, seq_name=None, max_x_range=None, max_y_range=None, merge_dist_thres=None):
     seq2Dist[seq_name] = Dist                               # save all seqs distance matrix, debug line, delete later
     # displayDist(seq2Dist, seq_name, isMerged=False, isSplit=True)         # used to display Dist, debug line, delete later=
@@ -423,19 +315,18 @@ def merge_tracklets(tracklets, seq2Dist, Dist, seq_name=None, max_x_range=None, 
         # print(f"Minimum value in masked Dist: {min_value}")
         # print(f"Corresponding value in Dist using recalculated indices: {Dist[track1_idx, track2_idx]}")
 
-        assert min_value == Dist[track1_idx, track2_idx], "Values should match!"
+        assert min_value == Dist[track1_idx, track2_idx] == Dist[track2_idx, track1_idx], "Values should match!"
 
         track1 = tracklets[idx2tid[track1_idx]]
         track2 = tracklets[idx2tid[track2_idx]]
 
         inSpatialRange = check_spatial_constraints(track1, track2, max_x_range, max_y_range)
-        # inSpatialRange = True
         # print("In spatial range:", inSpatialRange)
         if inSpatialRange:
             track1.features += track2.features      # Note: currently we merge track 2 to track 1 without creating a new track
             track1.times += track2.times
             track1.bboxes += track2.bboxes
-
+            
             # update tracklets dictionary
             tracklets[idx2tid[track1_idx]] = track1
             tracklets.pop(idx2tid[track2_idx])
@@ -445,24 +336,13 @@ def merge_tracklets(tracklets, seq2Dist, Dist, seq_name=None, max_x_range=None, 
             Dist = np.delete(Dist, track2_idx, axis=1)  # Remove column for track2
             # update idx2tid
             idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
-            # instead of calculate the whole matrix, just update the row/column with merged tracklets and copy unaffected tacklet values
+            
             # Update distance matrix only for the merged tracklet's row and column
             for idx in range(Dist.shape[0]):
-                # if idx != track1_idx:  # Don't update distance to itself
                 Dist[track1_idx, idx] = get_distance(idx2tid[track1_idx], idx2tid[idx], tracklets[idx2tid[track1_idx]], tracklets[idx2tid[idx]])
                 Dist[idx, track1_idx] = Dist[track1_idx, idx]  # Ensure symmetry
-            # TODO: check Dist is the same as get_distance_matrix(tracklets)
-            # Debugging: Check if the updated Dist is the same as recalculating from scratch
-            # full_recalculated_Dist = get_distance_matrix(tracklets)# Check where the matrices differ
-            # if not np.allclose(Dist, full_recalculated_Dist):
-            #     print("Differences found between updated and recalculated matrices!")
-            #     diff_indices = np.argwhere(~np.isclose(Dist, full_recalculated_Dist))
-
-            #     for row, col in diff_indices:
-            #         print(f"Difference at row {row}, column {col}: Updated = {Dist[row, col]}, Recalculated = {full_recalculated_Dist[row, col]}")
-            # assert np.allclose(Dist, full_recalculated_Dist), "Mismatch between updated and recalculated distance matrices!"
-
-            seq2Dist[seq_name] = Dist                   # used to display Dist debug line, delete later
+            
+            seq2Dist[seq_name] = Dist                   # used to display Dist
             
             # update mask
             diagonal_mask = np.eye(Dist.shape[0], dtype=bool)
@@ -506,9 +386,7 @@ def detect_id_switch(embs, eps=None, min_samples=None, max_clusters=None):
     if -1 in labels and len(unique_labels) > 1:
         # Find the cluster centers
         cluster_centers = np.array([embs_scaled[labels == label].mean(axis=0) for label in unique_labels])
-        # if len(unique_labels) == 1 and unique_labels[0] == -1:      # debug line, delete later
-        #     print("Cluster centers:\n", cluster_centers)            # debug line, delete later
-        #     print("Labels:\n", labels)                              # debug line, delete later
+        
         # Assign noise points to the nearest cluster
         noise_indices = np.where(labels == -1)[0]
         for idx in noise_indices:
@@ -597,8 +475,10 @@ def save_results(sct_output_path, tracklets):
 
     """
     results = []
-    for track_id, track in tracklets.items(): # add each track to results
-        tid = track.track_id
+
+    for i, tid in enumerate(sorted(tracklets.keys())): # add each track to results
+        track = tracklets[tid]
+        tid = i + 1
         for instance_idx, frame_id in enumerate(track.times):
             bbox = track.bboxes[instance_idx]
             
@@ -701,8 +581,7 @@ def main():
     for seq_idx, seq in enumerate(seqs_tracks):
         if seq_idx >= process_limit:            # debug line, delete later
             break                               # debug line, delete later
-        # if seq_idx != 2: continue                                          # debug line, delete later
-        # print("Seq name:\n", seq)                                           # debug line, delete later
+        
         seq_name = seq.split('.')[0]
         logger.info(f"Processing seq {seq_idx+1} / {len(seqs_tracks)}")
         with open(os.path.join(seq_tracks_dir, seq), 'rb') as pkl_f:
