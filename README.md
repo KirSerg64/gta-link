@@ -24,13 +24,11 @@ The following videos demonstrate the tracking performance on a SoccerNet sequenc
 ### Before Correction
 <video width="400" controls>
   <source src="demo_media\116_DeepEIoU_baseline_clip.mp4" type="video/mp4">
-  Your browser does not support the video tag.
 </video>
 
 ### After Correction
 <video width="400" controls>
   <source src="demo_media\116_DeepEIoU_split_connect_clip.mp4" type="video/mp4">
-  Your browser does not support the video tag.
 </video>
 
 
