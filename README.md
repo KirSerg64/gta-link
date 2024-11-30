@@ -22,10 +22,10 @@
 
 The following videos demonstrate the tracking performance on a SoccerNet sequence. Notice how the referee in the yellow jersey is correctly identified after applying the GTA refinement process.
 ### Before Correction
-[View Before Correction Video](demo_media\116_DeepEIoU_baseline_clip.mp4)
+[View Before Correction Video](demo_media/116_DeepEIoU_baseline_clip.mp4)
 
 ### After 
-[View Before Correction Video](demo_media\116_DeepEIoU_split_connect_clip.mp4)
+[View Before Correction Video](demo_media/116_DeepEIoU_split_connect_clip.mp4)
 
 
 ## Introduction
