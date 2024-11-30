@@ -4,7 +4,7 @@
 
 ## Results on Datasets
 
-<img src="images/HOTA_comparison_scatter_final.png" alt="Performance Comparison" width="400">
+<img src="demo_media/HOTA_comparison_scatter_final.png" alt="Performance Comparison" width="400">
 
 ## Demo
 
