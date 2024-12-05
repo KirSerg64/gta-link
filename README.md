@@ -156,3 +156,14 @@ Make sure to replace placeholders (e.g., `{}`) with actual values when running t
     - `--use_connect`: Include this flag to use the connecting component.
     - `--spatial_factor`: Factor to adjust spatial constraints (default is 1.0).
     - `--merge_dist_thres`: Minimum cosine distance between two tracklets for merging (default is 0.4).
+
+## Citation
+If you use this code, please cite the following publication:
+```bibtex
+@inproceedings{sun2024gta,
+  title={GTA: Global Tracklet Association for Multi-Object Tracking in Sports},
+  author={Sun, Jiacheng and Huang, Hsiang-Wei and Yang, Cheng-Yen and Hwang, Jenq-Neng},
+  booktitle = {Proceedings of the Fourth Workshop on Machine Learning and Computing for Visual Semantic Analysis (MLCSA2024) at ACCV 2024},
+  year={2024}
+}
+```
