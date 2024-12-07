@@ -163,7 +163,8 @@ If you use this code, please cite the following publication:
 @inproceedings{sun2024gta,
   title={GTA: Global Tracklet Association for Multi-Object Tracking in Sports},
   author={Sun, Jiacheng and Huang, Hsiang-Wei and Yang, Cheng-Yen and Hwang, Jenq-Neng},
-  booktitle = {Proceedings of the Fourth Workshop on Machine Learning and Computing for Visual Semantic Analysis (MLCSA2024) at ACCV 2024},
+  booktitle = {Proceedings of the Asian Conference on Computer Vision},
+  pages = {421-434},
   year={2024},
   publisher = {Springer}
 }
