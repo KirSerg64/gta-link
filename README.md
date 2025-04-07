@@ -76,13 +76,19 @@ This refinement tool helps enhance tracking results from any tracker for an MOT 
     ```
 
 7. Install the torchreid model based on OSNet
+   
     - Option 1:
+    Use pip to install torchreid (1.4.0 as of 04/07/2025)
+        ```bash
+        pip install torchreid
+        ```
+    - Option 2:
     Open the reid folder and install torchreid (project tested on torchreid 1.4.0)
         ```bash
         cd reid
         python setup.py develop
         ```
-    - Option 2:
+    - Option 3:
     In project folder, creat folder 'reid', then clone torchreid repository to local machine for the newest version of torchreid
         ```bash
         cd gta-link
