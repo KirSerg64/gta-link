@@ -7,3 +7,4 @@ _temp
 tools/__pycache__/*
 reid/*
 reid/
+.vscode/

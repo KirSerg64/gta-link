@@ -6,6 +6,7 @@ import os
 from tqdm import tqdm
 from loguru import logger
 from PIL import Image
+from pathlib import Path
 
 import pickle
 import numpy as np
@@ -23,17 +24,19 @@ def main(model_path, data_path, pred_dir, tracker):
             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
 
-    split = os.path.basename(data_path)
+    # split = os.path.basename(data_path)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    extractor = None
     extractor = FeatureExtractor(
         model_name='osnet_x1_0',
         model_path = model_path,
         device=device
     )
 
-    output_dir = os.path.join(os.path.dirname(pred_dir), f'{tracker}_Tracklets_{split}')  # output directory for sequences' tracklets
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir = Path(pred_dir).parent
+    output_dir = output_dir / f'{tracker}_Tracklets'  # output directory for sequences' tracklets
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     seqs = sorted([file for file in os.listdir(pred_dir) if file.endswith('.txt')])
 
@@ -45,7 +48,7 @@ def main(model_path, data_path, pred_dir, tracker):
         last_frame = int(track_res[-1][0])
         seq_tracks = {}
 
-        for frame_id in range(1, last_frame+1):
+        for frame_id in range(0, last_frame):
             if frame_id%100 == 0:
                 logger.info(f'Processing frame {frame_id}/{last_frame}')
 
@@ -111,7 +114,7 @@ if __name__ == "__main__":
                         help="Directory containing prediction files.")
     parser.add_argument('--tracker',
                         type=str,
-                        default='DeepEIoU',
+                        default='StrongSORT',
                         # required=True,
                         help="Name of the tracker.")
     
