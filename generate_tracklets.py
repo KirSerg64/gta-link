@@ -1,6 +1,6 @@
 # This script produces tracklets given tracking results and original sequence frame as RGB images.
 import argparse
-from torchreid.utils import FeatureExtractor
+from utils.feature_extractor import FeatureExtractor
 
 import os
 from tqdm import tqdm
