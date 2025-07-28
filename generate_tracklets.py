@@ -1,6 +1,7 @@
 # This script produces tracklets given tracking results and original sequence frame as RGB images.
 import argparse
-from utils.feature_extractor import FeatureExtractor
+# from utils.feature_extractor import FeatureExtractor
+from utils.feature_extractor_onnx import FeatureExtractorOnnx
 
 import os
 from tqdm import tqdm
@@ -28,7 +29,7 @@ def main(model_path, data_path, pred_dir, tracker):
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     extractor = None
-    extractor = FeatureExtractor(
+    extractor = FeatureExtractorOnnx(
         model_name='osnet_x1_0',
         model_path = model_path,
         device=device
@@ -80,7 +81,11 @@ def main(model_path, data_path, pred_dir, tracker):
             
             if input_batch is not None:
                 features = extractor(input_batch)    # len(features) == len(frame_res)
-                feats = features.cpu().detach().numpy()
+                if isinstance(features, torch.Tensor):
+                    features = features.cpu().detach().numpy()
+                elif isinstance(features, np.ndarray):
+                    pass
+                feats = features
                 
                 # update tracklets with feature
                 for tid, idx in tid2idx.items():
