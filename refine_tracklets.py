@@ -174,6 +174,7 @@ def display_Dist(Dist, seq_name=None, isMerged=False, isSplit=False):
 
     plt.title(f"{seq_name}{info}")
     plt.show()
+    # plt.savefig(f"{seq_name}{info}_heatmap.png", bbox_inches='tight', dpi=120)
 
 def get_distance_matrix(tid2track):
     """
@@ -497,6 +498,40 @@ def save_results(sct_output_path, tracklets):
         f.writelines(txt_results)
     logger.info(f"save SCT results to {sct_output_path}")
 
+
+def save_results_pkl(sct_output_path, tracklets):
+    """
+    Saves the final tracklet results into a specified path.
+
+    Args:
+        sct_output_path (str): Path where the results will be saved.
+        tracklets (dict): Dictionary of tracklets containing their final states.
+
+    """
+    results = []
+
+    for i, tid in enumerate(sorted(tracklets.keys())): # add each track to results
+        track = tracklets[tid]
+        tid = i + 1
+        for instance_idx, frame_id in enumerate(track.times):
+            bbox = track.bboxes[instance_idx]
+            
+            results.append(
+                [frame_id, tid, bbox[0], bbox[1], bbox[2], bbox[3], 1, -1, -1, -1]
+            )
+    results = sorted(results, key=lambda x: x[0])
+    txt_results = []
+    for line in results:
+        txt_results.append(
+            f"{line[0]},{line[1]},{line[2]:.2f},{line[3]:.2f},{line[4]:.2f},{line[5]:.2f},{line[6]},{line[7]},{line[8]},{line[9]}\n"
+            )
+    
+    # NOTE: uncomment to save results
+    with open(sct_output_path, 'w') as f:
+        f.writelines(txt_results)
+    logger.info(f"save SCT results to {sct_output_path}")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Global tracklet association with splitting and connecting.")
     parser.add_argument('--dataset',
@@ -589,9 +624,9 @@ def main():
 
         max_x_range, max_y_range = get_spatial_constraints(tmp_trklets, args.spatial_factor)
         
-        # Dist = get_distance_matrix(tmp_trklets)
-        # seq2Dist[seq_name] = Dist                                              # save all seqs distance matrix, debug line, delete later
-        # display_Dist(Dist, seq_name, isMerged=False, isSplit=False)         # used to display Dist, debug line, delete later
+        Dist = get_distance_matrix(tmp_trklets)
+        seq2Dist[seq_name] = Dist                                              # save all seqs distance matrix, debug line, delete later
+        display_Dist(Dist, seq_name, isMerged=False, isSplit=False)         # used to display Dist, debug line, delete later
 
         if args.use_split:
             print(f"----------------Number of tracklets before splitting: {len(tmp_trklets)}----------------")
@@ -600,12 +635,12 @@ def main():
             splitTracklets = tmp_trklets
         
         Dist = get_distance_matrix(splitTracklets)
-        # display_Dist(Dist, seq_name, isMerged=False, isSplit=True)
+        display_Dist(Dist, seq_name, isMerged=False, isSplit=True)
         print(f"----------------Number of tracklets before merging: {len(splitTracklets)}----------------")
         
         mergedTracklets = merge_tracklets(splitTracklets, seq2Dist, Dist, seq_name=seq_name, max_x_range=max_x_range, max_y_range=max_y_range, merge_dist_thres=args.merge_dist_thres)
-        # Dist = get_distance_matrix(mergedTracklets)
-        # display_Dist(Dist, seq_name, isMerged=True, isSplit=True)
+        Dist = get_distance_matrix(mergedTracklets)
+        display_Dist(Dist, seq_name, isMerged=True, isSplit=True)
         print(f"----------------Number of tracklets after merging: {len(mergedTracklets)}----------------")
 
         sct_name = f'{tracker}_{dataset}_{process}_eps{args.eps}_minSamples{args.min_samples}_K{args.max_k}_mergeDist{args.merge_dist_thres}_spatial{args.spatial_factor}'
