@@ -672,15 +672,15 @@ class PlayerReIDEvaluator:
         results_dict = {
             'results': [
                 {
-                    'tracklet_id_1': r.tracklet_id_1,
-                    'tracklet_id_2': r.tracklet_id_2,
-                    'image_idx_1': r.image_idx_1,
-                    'image_idx_2': r.image_idx_2,
-                    'num_matches': r.num_matches,
-                    'num_filtered_matches': r.num_filtered_matches,
-                    'avg_match_distance': r.avg_match_distance,
-                    'match_confidence': r.match_confidence,
-                    'is_same_tracklet': r.is_same_tracklet
+                    'tracklet_id_1': int(r.tracklet_id_1),
+                    'tracklet_id_2': int(r.tracklet_id_2),
+                    'image_idx_1': int(r.image_idx_1),
+                    'image_idx_2': int(r.image_idx_2),
+                    'num_matches': int(r.num_matches),
+                    'num_filtered_matches': int(r.num_filtered_matches),
+                    'avg_match_distance': float(r.avg_match_distance),
+                    'match_confidence': float(r.match_confidence),
+                    'is_same_tracklet': bool(r.is_same_tracklet)
                 }
                 for r in self.results
             ]
