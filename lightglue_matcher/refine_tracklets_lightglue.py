@@ -557,6 +557,11 @@ def parse_args():
                         required=True,
                         help='Source directory of tracklet pkl files.')
     
+    parser.add_argument('--output_dir',
+                        type=str,
+                        required=True,
+                        help='Directory to save output files.')
+    
     parser.add_argument('--use_split',
                         action='store_true',
                         help='If using split component.')
@@ -669,7 +674,7 @@ def main():
         raise ValueError("Both use_split and use_connect are false, must at least use connect.")
 
     seq_tracks_dir = args.track_src
-    data_path = os.path.dirname(seq_tracks_dir)
+    data_path = args.output_dir
     seqs_tracks = [f for f in os.listdir(seq_tracks_dir) if f.endswith('.pkl')]
     
     tracker = args.tracker
@@ -741,7 +746,7 @@ def main():
         # logger.info(f"Number of tracklets after merging: {len(mergedTracklets)}")
 
         # Save results
-        sct_name = f'{tracker}_{dataset}_{process}_kp{args.lightglue_max_keypoints}_samples{args.lightglue_samples}_mergeDist{args.merge_dist_thres}'
+        sct_name = f'{tracker}_{dataset}_{process}'
         os.makedirs(os.path.join(data_path, sct_name), exist_ok=True)
         new_sct_output_path = os.path.join(data_path, sct_name, '{}.txt'.format(seq_name))
         save_results(new_sct_output_path, mergedTracklets)
