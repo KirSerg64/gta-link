@@ -116,7 +116,8 @@ class TrackletLightGlueMatcher:
                  enable_cache: bool = True,
                  cache_size_gb: float = 10.0,
                  use_clahe: bool = True,
-                 batch_size: int = 16):
+                 batch_size: int = 16,
+                 match_batch_size: int = 32):
         """
         Initialize LightGlue matcher for tracklet distance calculation
         
@@ -132,6 +133,7 @@ class TrackletLightGlueMatcher:
             cache_size_gb: Cache size limit in GB
             use_clahe: Apply CLAHE for better feature detection
             batch_size: Batch size for feature extraction
+            match_batch_size: Batch size for LightGlue matching (higher = faster but more memory)
         """
         if not LIGHTGLUE_AVAILABLE:
             raise ImportError("LightGlue is not installed. Please install it first.")
@@ -144,6 +146,7 @@ class TrackletLightGlueMatcher:
         self.min_crop_size = min_crop_size
         self.use_clahe = use_clahe
         self.batch_size = batch_size
+        self.match_batch_size = match_batch_size
         
         # Initialize cache
         self.cache = FrameCache(max_size_gb=cache_size_gb) if enable_cache else None
@@ -371,6 +374,87 @@ class TrackletLightGlueMatcher:
             'confidence': filtered_confidence
         }
     
+    @torch.no_grad()
+    def match_features_batch(self,
+                            features_pairs: List[Tuple[Dict, Dict, Tuple[int, int], Tuple[int, int]]],
+                            batch_size: int = 32) -> List[Dict]:
+        """
+        Batch match multiple feature pairs simultaneously for better GPU utilization
+        
+        Args:
+            features_pairs: List of (features1, features2, img_shape1, img_shape2) tuples
+            batch_size: Number of pairs to process in parallel
+        
+        Returns:
+            List of match result dictionaries
+        """
+        all_results = []
+        
+        # Process in batches to avoid OOM
+        for batch_start in range(0, len(features_pairs), batch_size):
+            batch_end = min(batch_start + batch_size, len(features_pairs))
+            batch = features_pairs[batch_start:batch_end]
+            
+            # Prepare batch tensors
+            batch_keypoints0 = []
+            batch_descriptors0 = []
+            batch_keypoints1 = []
+            batch_descriptors1 = []
+            batch_sizes0 = []
+            batch_sizes1 = []
+            
+            for feat1, feat2, shape1, shape2 in batch:
+                # Extract tensors from feature dicts
+                batch_keypoints0.append(feat1['keypoints'][0])
+                batch_descriptors0.append(feat1['descriptors'][0])
+                batch_keypoints1.append(feat2['keypoints'][0])
+                batch_descriptors1.append(feat2['descriptors'][0])
+                batch_sizes0.append(torch.tensor(shape1, device=self.device))
+                batch_sizes1.append(torch.tensor(shape2, device=self.device))
+            
+            # Stack into batch tensors
+            # Note: LightGlue expects [B, N, D] format
+            batch_features0 = {
+                'keypoints': torch.stack(batch_keypoints0, dim=0),
+                'descriptors': torch.stack(batch_descriptors0, dim=0),
+                'image_size': torch.stack(batch_sizes0, dim=0)
+            }
+            batch_features1 = {
+                'keypoints': torch.stack(batch_keypoints1, dim=0),
+                'descriptors': torch.stack(batch_descriptors1, dim=0),
+                'image_size': torch.stack(batch_sizes1, dim=0)
+            }
+            
+            # Perform batch matching
+            matches_dict = self.matcher({'image0': batch_features0, 'image1': batch_features1})
+            
+            # Extract results for each pair in batch
+            matches_batch = matches_dict['matches0'].cpu().numpy()  # [B, N]
+            confidence_batch = matches_dict['matching_scores0'].cpu().numpy()  # [B, N]
+            
+            for i in range(len(batch)):
+                matches = matches_batch[i]
+                confidence = confidence_batch[i]
+                
+                # Filter by confidence
+                valid = matches > -1
+                valid_matches = matches[valid]
+                valid_confidence = confidence[valid]
+                
+                # Apply confidence threshold
+                high_conf_mask = valid_confidence >= self.confidence_threshold
+                filtered_matches = valid_matches[high_conf_mask]
+                filtered_confidence = valid_confidence[high_conf_mask]
+                
+                all_results.append({
+                    'num_matches': len(filtered_matches),
+                    'avg_confidence': np.mean(filtered_confidence) if len(filtered_confidence) > 0 else 0.0,
+                    'matches': filtered_matches,
+                    'confidence': filtered_confidence
+                })
+        
+        return all_results
+    
     def compute_tracklet_features(self, tracklet) -> Tuple[List[np.ndarray], List[Dict]]:
         """
         Extract crops and features for sampled frames from tracklet
@@ -521,23 +605,19 @@ class TrackletLightGlueMatcher:
                         pbar.update(1)
                         continue
                     
-                    # Match all pairs
-                    total_matches = 0
-                    total_confidence = 0.0
-                    num_pairs = 0
-                    
+                    # Build batch of all frame pairs for this tracklet pair
+                    frame_pairs = []
                     for feat1, crop1 in zip(features1, crops1):
                         for feat2, crop2 in zip(features2, crops2):
-                            match_result = self.match_features(
-                                feat1,
-                                feat2,
-                                crop1.shape[:2],
-                                crop2.shape[:2]
-                            )
-                            
-                            total_matches += match_result['num_matches']
-                            total_confidence += match_result['avg_confidence'] * match_result['num_matches']
-                            num_pairs += 1
+                            frame_pairs.append((feat1, feat2, crop1.shape[:2], crop2.shape[:2]))
+                    
+                    # Batch match all frame pairs at once (VECTORIZED!)
+                    match_results = self.match_features_batch(frame_pairs, batch_size=self.match_batch_size)
+                    
+                    # Aggregate results
+                    total_matches = sum(r['num_matches'] for r in match_results)
+                    total_confidence = sum(r['avg_confidence'] * r['num_matches'] for r in match_results)
+                    num_pairs = len(match_results)
                     
                     if total_matches == 0:
                         dist_matrix[i][j] = 1.0

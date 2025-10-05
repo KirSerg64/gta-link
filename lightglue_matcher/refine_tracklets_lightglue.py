@@ -323,10 +323,10 @@ def check_spatial_constraints(trk_1, trk_2, max_x_range, max_y_range):
     return inSpatialRange
 
 
-def merge_tracklets(tracklets, seq2Dist, Dist, seq_name=None, max_x_range=None, max_y_range=None, 
-                    merge_dist_thres=None, matcher=None):
+def merge_tracklets_optimized(tracklets, seq2Dist, Dist, seq_name=None, max_x_range=None, max_y_range=None, 
+                              merge_dist_thres=None, matcher=None):
     """
-    Merge tracklets based on distance matrix using hierarchical clustering.
+    GPU-optimized merge tracklets using PyTorch for faster distance updates.
     
     Args:
         tracklets: Dictionary of tracklets
@@ -338,6 +338,191 @@ def merge_tracklets(tracklets, seq2Dist, Dist, seq_name=None, max_x_range=None, 
         merge_dist_thres: Distance threshold for merging
         matcher: LightGlue matcher for recomputing distances after merge
     """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Convert to torch tensor for GPU operations
+    Dist_tensor = torch.from_numpy(Dist).float().to(device)
+    seq2Dist[seq_name] = Dist
+    
+    idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
+    
+    # Create masks on GPU
+    n = Dist_tensor.shape[0]
+    diagonal_mask = torch.eye(n, dtype=torch.bool, device=device)
+    non_diagonal_mask = ~diagonal_mask
+    
+    merge_count = 0
+    with tqdm(desc="Merging tracklets", unit="merge") as pbar:
+        while True:
+            # Find minimum distance on GPU
+            masked_dists = torch.where(non_diagonal_mask, Dist_tensor, torch.tensor(float('inf'), device=device))
+            min_value = masked_dists.min().item()
+            
+            if min_value >= merge_dist_thres:
+                break
+            
+            # Find indices of minimum
+            min_flat_idx = masked_dists.flatten().argmin().item()
+            track1_idx = min_flat_idx // n
+            track2_idx = min_flat_idx % n
+            
+            logger.debug(f"Merge {merge_count}: tracks {track1_idx}, {track2_idx} (dist: {min_value:.4f})")
+            
+            track1 = tracklets[idx2tid[track1_idx]]
+            track2 = tracklets[idx2tid[track2_idx]]
+            
+            inSpatialRange = check_spatial_constraints(track1, track2, max_x_range, max_y_range)
+            
+            if inSpatialRange:
+                # Merge tracklets
+                if hasattr(track1, 'features') and hasattr(track2, 'features'):
+                    track1.features += track2.features
+                track1.times += track2.times
+                track1.bboxes += track2.bboxes
+                
+                tracklets[idx2tid[track1_idx]] = track1
+                tracklets.pop(idx2tid[track2_idx])
+                
+                # Remove merged tracklet row/col from GPU tensor
+                # Keep all except track2_idx
+                keep_indices = torch.cat([
+                    torch.arange(track2_idx, device=device),
+                    torch.arange(track2_idx + 1, n, device=device)
+                ])
+                
+                Dist_tensor = Dist_tensor[keep_indices][:, keep_indices]
+                n = Dist_tensor.shape[0]
+                
+                # Update index mapping
+                idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
+                
+                # Recompute distances for merged tracklet using matcher (BATCHED!)
+                if matcher is not None and n > 1:
+                    # Build list of all tracklets to compare with merged one
+                    other_indices = [i for i in range(n) if i != track1_idx]
+                    
+                    if other_indices:
+                        # Prepare batch of comparisons
+                        merged_tracklet = tracklets[idx2tid[track1_idx]]
+                        
+                        # Extract features once for merged tracklet
+                        crops1, features1 = matcher.compute_tracklet_features(merged_tracklet)
+                        
+                        # Batch compute all distances at once
+                        new_distances = []
+                        frame_pairs_all = []
+                        pair_boundaries = [0]  # Track which pairs belong to which comparison
+                        
+                        for other_idx in other_indices:
+                            other_tracklet = tracklets[idx2tid[other_idx]]
+                            
+                            # Check temporal overlap first
+                            if set(merged_tracklet.times) & set(other_tracklet.times):
+                                new_distances.append(1.0)
+                                continue
+                            
+                            crops2, features2 = matcher.compute_tracklet_features(other_tracklet)
+                            
+                            if not features1 or not features2:
+                                new_distances.append(1.0)
+                                continue
+                            
+                            # Build frame pairs for this tracklet pair
+                            start_idx = len(frame_pairs_all)
+                            for feat1, crop1 in zip(features1, crops1):
+                                for feat2, crop2 in zip(features2, crops2):
+                                    frame_pairs_all.append((feat1, feat2, crop1.shape[:2], crop2.shape[:2]))
+                            pair_boundaries.append(len(frame_pairs_all))
+                            
+                        # Batch match ALL frame pairs at once (MEGA VECTORIZATION!)
+                        if frame_pairs_all:
+                            match_results_all = matcher.match_features_batch(
+                                frame_pairs_all, 
+                                batch_size=matcher.match_batch_size
+                            )
+                            
+                            # Aggregate results for each tracklet pair
+                            result_idx = 0
+                            for i in range(len(pair_boundaries) - 1):
+                                start = pair_boundaries[i]
+                                end = pair_boundaries[i + 1]
+                                num_pairs = end - start
+                                
+                                if num_pairs == 0:
+                                    continue
+                                
+                                # Get results for this tracklet pair
+                                pair_results = match_results_all[start:end]
+                                
+                                total_matches = sum(r['num_matches'] for r in pair_results)
+                                total_confidence = sum(r['avg_confidence'] * r['num_matches'] for r in pair_results)
+                                
+                                if total_matches == 0:
+                                    new_distances.append(1.0)
+                                else:
+                                    avg_matches_per_pair = total_matches / num_pairs
+                                    avg_confidence = total_confidence / total_matches
+                                    
+                                    match_score = 1.0 / (1.0 + avg_matches_per_pair / 20.0)
+                                    confidence_score = 1.0 - avg_confidence
+                                    distance = 0.6 * match_score + 0.4 * confidence_score
+                                    new_distances.append(distance)
+                        
+                        # Update distance matrix on GPU
+                        new_distances_tensor = torch.tensor(new_distances, dtype=torch.float32, device=device)
+                        
+                        # Update row and column for track1_idx
+                        dist_idx = 0
+                        for i, other_idx in enumerate(other_indices):
+                            if dist_idx < len(new_distances_tensor):
+                                Dist_tensor[track1_idx, other_idx] = new_distances_tensor[dist_idx]
+                                Dist_tensor[other_idx, track1_idx] = new_distances_tensor[dist_idx]
+                                dist_idx += 1
+                
+                # Update masks
+                diagonal_mask = torch.eye(n, dtype=torch.bool, device=device)
+                non_diagonal_mask = ~diagonal_mask
+                
+                merge_count += 1
+                pbar.update(1)
+                pbar.set_postfix({'remaining_tracklets': n})
+            else:
+                # Mark as non-mergeable
+                Dist_tensor[track1_idx, track2_idx] = merge_dist_thres
+                Dist_tensor[track2_idx, track1_idx] = merge_dist_thres
+    
+    logger.info(f"Completed {merge_count} merges, {len(tracklets)} tracklets remaining")
+    
+    # Convert back to numpy for compatibility
+    seq2Dist[seq_name] = Dist_tensor.cpu().numpy()
+    
+    return tracklets
+
+
+def merge_tracklets(tracklets, seq2Dist, Dist, seq_name=None, max_x_range=None, max_y_range=None, 
+                    merge_dist_thres=None, matcher=None):
+    """
+    Merge tracklets based on distance matrix using hierarchical clustering.
+    Automatically uses GPU-optimized version if CUDA available.
+    
+    Args:
+        tracklets: Dictionary of tracklets
+        seq2Dist: Dictionary to store distance matrices
+        Dist: Initial distance matrix
+        seq_name: Sequence name
+        max_x_range: Maximum spatial x range
+        max_y_range: Maximum spatial y range
+        merge_dist_thres: Distance threshold for merging
+        matcher: LightGlue matcher for recomputing distances after merge
+    """
+    # Use optimized version if GPU available
+    if torch.cuda.is_available():
+        logger.info("Using GPU-optimized merge with batched distance recomputation")
+        return merge_tracklets_optimized(tracklets, seq2Dist, Dist, seq_name, 
+                                        max_x_range, max_y_range, merge_dist_thres, matcher)
+    
+    # Fallback to original CPU version
+    logger.info("Using CPU merge (GPU not available)")
     seq2Dist[seq_name] = Dist
 
     idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
@@ -642,6 +827,11 @@ def parse_args():
                         default=16,
                         help='Batch size for feature extraction.')
     
+    parser.add_argument('--lightglue_match_batch_size',
+                        type=int,
+                        default=32,
+                        help='Batch size for LightGlue matching (higher = faster but more GPU memory). Use 32-64 for A100.')
+    
     parser.add_argument('--use_clahe',
                         action='store_true',
                         default=True,
@@ -695,6 +885,7 @@ def main():
     logger.info(f"Max keypoints: {args.lightglue_max_keypoints}")
     logger.info(f"Samples per tracklet: {args.lightglue_samples}")
     logger.info(f"Sample strategy: {args.lightglue_sample_strategy}")
+    logger.info(f"Match batch size: {args.lightglue_match_batch_size} (BATCHED MATCHING ENABLED)")
     logger.info("=" * 80)
     
     matcher = TrackletLightGlueMatcher(
@@ -708,7 +899,8 @@ def main():
         enable_cache=True,
         cache_size_gb=args.lightglue_cache_size,
         use_clahe=args.use_clahe,
-        batch_size=args.lightglue_batch_size
+        batch_size=args.lightglue_batch_size,
+        match_batch_size=args.lightglue_match_batch_size
     )
 
     process_limit = 10000
