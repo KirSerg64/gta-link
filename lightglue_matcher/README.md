@@ -85,6 +85,22 @@ python refine_tracklets_lightglue.py \
     --device cuda
 ```
 
+### With Visualization Video
+
+```bash
+python refine_tracklets_lightglue.py \
+    --dataset SoccerNet \
+    --tracker SORT \
+    --track_src ./data/tracklets \
+    --video_path ./data/7_06_25fps_2min.mp4 \
+    --use_connect \
+    --merge_dist_thres 0.5 \
+    --create_video \
+    --video_output_dir ./output/videos
+```
+
+This will create a visualization video showing the refined tracklets with IDs drawn on each player.
+
 ---
 
 ## Command-Line Arguments
@@ -118,6 +134,8 @@ python refine_tracklets_lightglue.py \
 | `--lightglue_batch_size` | int | 16 | Batch size for feature extraction |
 | `--use_clahe` | flag | True | Apply CLAHE preprocessing |
 | `--device` | str | cuda | `cuda` or `cpu` |
+| `--create_video` | flag | False | Create visualization video with refined tracklets |
+| `--video_output_dir` | str | None | Output directory for videos (defaults to results dir) |
 
 ---
 

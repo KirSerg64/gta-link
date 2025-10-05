@@ -49,6 +49,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Tracklet import Tracklet
 from lightglue_matcher import TrackletLightGlueMatcher, get_distance_lightglue
 
+# Import video creation utilities
+from utils.video_creator import create_final_tracklet_video
+
 import argparse
 
 
@@ -640,6 +643,15 @@ def parse_args():
                         choices=['cuda', 'cpu'],
                         help='Device for LightGlue computation.')
     
+    parser.add_argument('--create_video',
+                        action='store_true',
+                        help='Create visualization video with drawn tracklets.')
+    
+    parser.add_argument('--video_output_dir',
+                        type=str,
+                        default=None,
+                        help='Output directory for visualization videos. If not specified, uses track_src parent dir.')
+    
     return parser.parse_args()
 
 
@@ -704,7 +716,7 @@ def main():
         # Compute distance matrix using LightGlue
         Dist = get_distance_matrix_lightglue(tmp_trklets, matcher)
         seq2Dist[seq_name] = Dist
-        display_Dist(Dist, seq_name, isMerged=False, isSplit=False)
+        # display_Dist(Dist, seq_name, isMerged=False, isSplit=False)
 
         # Split if requested
         if args.use_split:
@@ -716,7 +728,7 @@ def main():
         
         # Recompute distance matrix after split
         Dist = get_distance_matrix_lightglue(splitTracklets, matcher)
-        display_Dist(Dist, seq_name, isMerged=False, isSplit=True)
+        # display_Dist(Dist, seq_name, isMerged=False, isSplit=True)
         logger.info(f"Number of tracklets before merging: {len(splitTracklets)}")
         
         # Merge tracklets
@@ -724,9 +736,9 @@ def main():
                                          max_x_range=max_x_range, max_y_range=max_y_range, 
                                          merge_dist_thres=args.merge_dist_thres, matcher=matcher)
         
-        Dist = get_distance_matrix_lightglue(mergedTracklets, matcher)
-        display_Dist(Dist, seq_name, isMerged=True, isSplit=True)
-        logger.info(f"Number of tracklets after merging: {len(mergedTracklets)}")
+        # Dist = get_distance_matrix_lightglue(mergedTracklets, matcher)
+        # display_Dist(Dist, seq_name, isMerged=True, isSplit=True)
+        # logger.info(f"Number of tracklets after merging: {len(mergedTracklets)}")
 
         # Save results
         sct_name = f'{tracker}_{dataset}_{process}_kp{args.lightglue_max_keypoints}_samples{args.lightglue_samples}_mergeDist{args.merge_dist_thres}'
@@ -735,6 +747,33 @@ def main():
         save_results(new_sct_output_path, mergedTracklets)
         
         logger.info(f"Results saved to: {new_sct_output_path}")
+        
+        # Create visualization video if requested
+        if args.create_video:
+            logger.info("Creating visualization video with refined tracklets...")
+            
+            # Determine output directory
+            if args.video_output_dir:
+                video_output_dir = args.video_output_dir
+            else:
+                video_output_dir = os.path.join(data_path, sct_name)
+            
+            os.makedirs(video_output_dir, exist_ok=True)
+            
+            # Output video path
+            video_output_path = os.path.join(video_output_dir, f'{seq_name}_refined_lightglue.mp4')
+            
+            try:
+                create_final_tracklet_video(
+                    video_path=args.video_path,
+                    final_tracklets=mergedTracklets,
+                    output_path=video_output_path,
+                    show_trajectories=False
+                )
+                logger.info(f"Visualization video saved to: {video_output_path}")
+            except Exception as e:
+                logger.error(f"Failed to create visualization video: {e}")
+                logger.exception(e)
     
     logger.info("Processing complete!")
 

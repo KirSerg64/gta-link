@@ -31,6 +31,21 @@ python refine_tracklets_lightglue.py \
 
 **Done!** Results will be in: `data/SORT_SoccerNet_Connect_LightGlue_kp2048_samples10_mergeDist0.5/`
 
+### Step 4: Create Visualization Video (Optional)
+
+```bash
+python refine_tracklets_lightglue.py \
+    --dataset SoccerNet \
+    --tracker SORT \
+    --track_src ./data/original_tracklets \
+    --video_path ./data/7_06_25fps_2min.mp4 \
+    --use_connect \
+    --merge_dist_thres 0.5 \
+    --create_video
+```
+
+This creates `*_refined_lightglue.mp4` with tracked players and IDs visualized.
+
 ---
 
 ## 📊 Compare Results (Optional)
