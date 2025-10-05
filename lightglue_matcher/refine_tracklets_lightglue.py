@@ -670,7 +670,7 @@ def main():
 
     seq_tracks_dir = args.track_src
     data_path = os.path.dirname(seq_tracks_dir)
-    seqs_tracks = os.listdir(seq_tracks_dir)
+    seqs_tracks = [f for f in os.listdir(seq_tracks_dir) if f.endswith('.pkl')]
     
     tracker = args.tracker
     dataset = args.dataset
