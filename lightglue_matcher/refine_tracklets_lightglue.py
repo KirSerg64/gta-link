@@ -699,6 +699,7 @@ def main():
         confidence_threshold=args.lightglue_confidence,
         sample_strategy=args.lightglue_sample_strategy,
         max_samples_per_tracklet=args.lightglue_samples,
+        min_crop_size=32,
         enable_cache=True,
         cache_size_gb=args.lightglue_cache_size,
         use_clahe=args.use_clahe,
