@@ -621,6 +621,11 @@ def parse_args():
                         default=10,
                         help='Number of frames to sample per tracklet.')
     
+    parser.add_argument('--min_crop_size',
+                        type=int,
+                        default=10,
+                        help='Minimum crop size for tracklets.')
+
     parser.add_argument('--lightglue_sample_strategy',
                         type=str,
                         default='uniform',
@@ -699,7 +704,7 @@ def main():
         confidence_threshold=args.lightglue_confidence,
         sample_strategy=args.lightglue_sample_strategy,
         max_samples_per_tracklet=args.lightglue_samples,
-        min_crop_size=32,
+        min_crop_size=args.min_crop_size,
         enable_cache=True,
         cache_size_gb=args.lightglue_cache_size,
         use_clahe=args.use_clahe,
