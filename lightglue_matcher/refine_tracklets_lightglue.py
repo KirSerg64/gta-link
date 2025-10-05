@@ -327,6 +327,7 @@ def merge_tracklets_optimized(tracklets, seq2Dist, Dist, seq_name=None, max_x_ra
                               merge_dist_thres=None, matcher=None):
     """
     GPU-optimized merge tracklets using PyTorch for faster distance updates.
+    Includes robust memory management to prevent OOM errors.
     
     Args:
         tracklets: Dictionary of tracklets
@@ -340,9 +341,32 @@ def merge_tracklets_optimized(tracklets, seq2Dist, Dist, seq_name=None, max_x_ra
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
+    # Memory management: monitor GPU memory
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        logger.info(f"GPU: {torch.cuda.get_device_name(0)} ({gpu_mem_gb:.1f} GB)")
+    
     # Convert to torch tensor for GPU operations
     Dist_tensor = torch.from_numpy(Dist).float().to(device)
     seq2Dist[seq_name] = Dist
+    
+    # Calculate safe batch size based on GPU memory
+    if torch.cuda.is_available():
+        # Conservative estimate: ~100MB per batch of 32 pairs at 2048 keypoints
+        available_mem_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        if available_mem_gb >= 40:  # A100
+            max_pairs_per_mega_batch = 2000
+        elif available_mem_gb >= 24:  # RTX 3090/4090
+            max_pairs_per_mega_batch = 1000
+        elif available_mem_gb >= 12:  # RTX 3060
+            max_pairs_per_mega_batch = 500
+        else:  # Smaller GPUs
+            max_pairs_per_mega_batch = 250
+        
+        logger.info(f"Max pairs per mega-batch: {max_pairs_per_mega_batch} (based on {available_mem_gb:.1f}GB GPU)")
+    else:
+        max_pairs_per_mega_batch = 100  # CPU fallback
     
     idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
     
@@ -354,9 +378,22 @@ def merge_tracklets_optimized(tracklets, seq2Dist, Dist, seq_name=None, max_x_ra
     merge_count = 0
     with tqdm(desc="Merging tracklets", unit="merge") as pbar:
         while True:
+            # Memory management: periodically clear cache
+            if merge_count > 0 and merge_count % 10 == 0:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    mem_allocated = torch.cuda.memory_allocated() / 1024**3
+                    mem_reserved = torch.cuda.memory_reserved() / 1024**3
+                    logger.debug(f"GPU Memory - Allocated: {mem_allocated:.2f}GB, Reserved: {mem_reserved:.2f}GB")
+            
             # Find minimum distance on GPU
             masked_dists = torch.where(non_diagonal_mask, Dist_tensor, torch.tensor(float('inf'), device=device))
             min_value = masked_dists.min().item()
+            
+            # Free temporary tensor immediately
+            del masked_dists
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             
             if min_value >= merge_dist_thres:
                 break
@@ -419,27 +456,57 @@ def merge_tracklets_optimized(tracklets, seq2Dist, Dist, seq_name=None, max_x_ra
                             # Check temporal overlap first
                             if set(merged_tracklet.times) & set(other_tracklet.times):
                                 new_distances.append(1.0)
+                                pair_boundaries.append(len(frame_pairs_all))  # No new pairs
                                 continue
                             
                             crops2, features2 = matcher.compute_tracklet_features(other_tracklet)
                             
                             if not features1 or not features2:
                                 new_distances.append(1.0)
+                                pair_boundaries.append(len(frame_pairs_all))  # No new pairs
                                 continue
                             
                             # Build frame pairs for this tracklet pair
-                            start_idx = len(frame_pairs_all)
                             for feat1, crop1 in zip(features1, crops1):
                                 for feat2, crop2 in zip(features2, crops2):
                                     frame_pairs_all.append((feat1, feat2, crop1.shape[:2], crop2.shape[:2]))
                             pair_boundaries.append(len(frame_pairs_all))
+                        
+                        # Memory management: split mega-batch if too large
+                        total_pairs = len(frame_pairs_all)
+                        
+                        if total_pairs > max_pairs_per_mega_batch:
+                            logger.warning(f"Mega-batch too large ({total_pairs} pairs), splitting into chunks of {max_pairs_per_mega_batch}")
                             
-                        # Batch match ALL frame pairs at once (MEGA VECTORIZATION!)
-                        if frame_pairs_all:
-                            match_results_all = matcher.match_features_batch(
-                                frame_pairs_all, 
-                                batch_size=matcher.match_batch_size
-                            )
+                            # Process in chunks to avoid OOM
+                            all_match_results = []
+                            for chunk_start in range(0, total_pairs, max_pairs_per_mega_batch):
+                                chunk_end = min(chunk_start + max_pairs_per_mega_batch, total_pairs)
+                                chunk_pairs = frame_pairs_all[chunk_start:chunk_end]
+                                
+                                # Match chunk
+                                chunk_results = matcher.match_features_batch(
+                                    chunk_pairs,
+                                    batch_size=min(matcher.match_batch_size, len(chunk_pairs))
+                                )
+                                all_match_results.extend(chunk_results)
+                                
+                                # Clear GPU memory after each chunk
+                                if torch.cuda.is_available():
+                                    torch.cuda.empty_cache()
+                                
+                                logger.debug(f"Processed chunk {chunk_start}-{chunk_end}/{total_pairs}")
+                            
+                            match_results_all = all_match_results
+                        else:
+                            # Batch match ALL frame pairs at once (MEGA VECTORIZATION!)
+                            if frame_pairs_all:
+                                match_results_all = matcher.match_features_batch(
+                                    frame_pairs_all, 
+                                    batch_size=matcher.match_batch_size
+                                )
+                            else:
+                                match_results_all = []
                             
                             # Aggregate results for each tracklet pair
                             result_idx = 0
@@ -449,6 +516,7 @@ def merge_tracklets_optimized(tracklets, seq2Dist, Dist, seq_name=None, max_x_ra
                                 num_pairs = end - start
                                 
                                 if num_pairs == 0:
+                                    # Already added distance of 1.0 for this tracklet
                                     continue
                                 
                                 # Get results for this tracklet pair
@@ -468,16 +536,26 @@ def merge_tracklets_optimized(tracklets, seq2Dist, Dist, seq_name=None, max_x_ra
                                     distance = 0.6 * match_score + 0.4 * confidence_score
                                     new_distances.append(distance)
                         
-                        # Update distance matrix on GPU
-                        new_distances_tensor = torch.tensor(new_distances, dtype=torch.float32, device=device)
+                        # Memory management: clear frame pairs and results
+                        del frame_pairs_all
+                        del match_results_all
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
                         
-                        # Update row and column for track1_idx
-                        dist_idx = 0
-                        for i, other_idx in enumerate(other_indices):
-                            if dist_idx < len(new_distances_tensor):
-                                Dist_tensor[track1_idx, other_idx] = new_distances_tensor[dist_idx]
-                                Dist_tensor[other_idx, track1_idx] = new_distances_tensor[dist_idx]
-                                dist_idx += 1
+                        # Update distance matrix on GPU
+                        if new_distances:
+                            new_distances_tensor = torch.tensor(new_distances, dtype=torch.float32, device=device)
+                            
+                            # Update row and column for track1_idx
+                            dist_idx = 0
+                            for other_idx in other_indices:
+                                if dist_idx < len(new_distances_tensor):
+                                    Dist_tensor[track1_idx, other_idx] = new_distances_tensor[dist_idx]
+                                    Dist_tensor[other_idx, track1_idx] = new_distances_tensor[dist_idx]
+                                    dist_idx += 1
+                            
+                            # Free tensor
+                            del new_distances_tensor
                 
                 # Update masks
                 diagonal_mask = torch.eye(n, dtype=torch.bool, device=device)

@@ -8,3 +8,8 @@ tools/__pycache__/*
 reid/*
 reid/
 .vscode/
+data/
+
+player_reid_keypoint/test_cli.py
+player_reid_keypoint/*.md
+lightglue_matcher/*.md

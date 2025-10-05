@@ -58,7 +58,7 @@ class MatchStatistics:
 
 
 class FrameCache:
-    """Cache for extracted frames and features to avoid redundant I/O"""
+    """LRU cache for extracted frames and features to avoid redundant I/O"""
     
     def __init__(self, max_size_gb: float = 10.0):
         """
@@ -66,8 +66,10 @@ class FrameCache:
             max_size_gb: Maximum cache size in GB
         """
         self.cache = {}
+        self.access_order = []  # Track access order for LRU
         self.max_size_bytes = int(max_size_gb * 1024 * 1024 * 1024)
         self.current_size = 0
+        self._eviction_count = 0
     
     def _get_key(self, video_path: str, frame_id: int, bbox: List[float]) -> str:
         """Generate unique key for frame crop"""
@@ -75,28 +77,45 @@ class FrameCache:
         return hashlib.md5(key_str.encode()).hexdigest()
     
     def get(self, video_path: str, frame_id: int, bbox: List[float]) -> Optional[np.ndarray]:
-        """Retrieve cached frame crop"""
+        """Retrieve cached frame crop (LRU)"""
         key = self._get_key(video_path, frame_id, bbox)
-        return self.cache.get(key)
+        if key in self.cache:
+            # Update access order
+            if key in self.access_order:
+                self.access_order.remove(key)
+            self.access_order.append(key)
+            return self.cache[key]
+        return None
     
     def put(self, video_path: str, frame_id: int, bbox: List[float], crop: np.ndarray):
-        """Store frame crop in cache"""
+        """Store frame crop in cache with LRU eviction"""
         key = self._get_key(video_path, frame_id, bbox)
         crop_size = crop.nbytes
         
-        # Simple LRU: if cache full, clear it (can be improved with proper LRU)
-        if self.current_size + crop_size > self.max_size_bytes:
-            logger.info(f"Frame cache full ({self.current_size / 1024**3:.2f} GB), clearing...")
-            self.cache.clear()
-            self.current_size = 0
+        # Evict least recently used items if needed
+        while self.current_size + crop_size > self.max_size_bytes and self.access_order:
+            lru_key = self.access_order.pop(0)
+            if lru_key in self.cache:
+                evicted_crop = self.cache.pop(lru_key)
+                self.current_size -= evicted_crop.nbytes
+                self._eviction_count += 1
+        
+        # If single item too large, skip caching
+        if crop_size > self.max_size_bytes:
+            logger.warning(f"Crop size {crop_size / 1024**2:.1f}MB exceeds cache limit, skipping")
+            return
         
         self.cache[key] = crop
+        self.access_order.append(key)
         self.current_size += crop_size
     
     def clear(self):
         """Clear cache"""
+        logger.info(f"Clearing frame cache (evictions: {self._eviction_count}, size: {self.current_size / 1024**3:.2f}GB)")
         self.cache.clear()
+        self.access_order.clear()
         self.current_size = 0
+        self._eviction_count = 0
 
 
 class TrackletLightGlueMatcher:
@@ -380,6 +399,7 @@ class TrackletLightGlueMatcher:
                             batch_size: int = 32) -> List[Dict]:
         """
         Batch match multiple feature pairs simultaneously for better GPU utilization
+        Includes robust memory management to prevent OOM errors.
         
         Args:
             features_pairs: List of (features1, features2, img_shape1, img_shape2) tuples
@@ -395,63 +415,95 @@ class TrackletLightGlueMatcher:
             batch_end = min(batch_start + batch_size, len(features_pairs))
             batch = features_pairs[batch_start:batch_end]
             
-            # Prepare batch tensors
-            batch_keypoints0 = []
-            batch_descriptors0 = []
-            batch_keypoints1 = []
-            batch_descriptors1 = []
-            batch_sizes0 = []
-            batch_sizes1 = []
-            
-            for feat1, feat2, shape1, shape2 in batch:
-                # Extract tensors from feature dicts
-                batch_keypoints0.append(feat1['keypoints'][0])
-                batch_descriptors0.append(feat1['descriptors'][0])
-                batch_keypoints1.append(feat2['keypoints'][0])
-                batch_descriptors1.append(feat2['descriptors'][0])
-                batch_sizes0.append(torch.tensor(shape1, device=self.device))
-                batch_sizes1.append(torch.tensor(shape2, device=self.device))
-            
-            # Stack into batch tensors
-            # Note: LightGlue expects [B, N, D] format
-            batch_features0 = {
-                'keypoints': torch.stack(batch_keypoints0, dim=0),
-                'descriptors': torch.stack(batch_descriptors0, dim=0),
-                'image_size': torch.stack(batch_sizes0, dim=0)
-            }
-            batch_features1 = {
-                'keypoints': torch.stack(batch_keypoints1, dim=0),
-                'descriptors': torch.stack(batch_descriptors1, dim=0),
-                'image_size': torch.stack(batch_sizes1, dim=0)
-            }
-            
-            # Perform batch matching
-            matches_dict = self.matcher({'image0': batch_features0, 'image1': batch_features1})
-            
-            # Extract results for each pair in batch
-            matches_batch = matches_dict['matches0'].cpu().numpy()  # [B, N]
-            confidence_batch = matches_dict['matching_scores0'].cpu().numpy()  # [B, N]
-            
-            for i in range(len(batch)):
-                matches = matches_batch[i]
-                confidence = confidence_batch[i]
+            try:
+                # Prepare batch tensors
+                batch_keypoints0 = []
+                batch_descriptors0 = []
+                batch_keypoints1 = []
+                batch_descriptors1 = []
+                batch_sizes0 = []
+                batch_sizes1 = []
                 
-                # Filter by confidence
-                valid = matches > -1
-                valid_matches = matches[valid]
-                valid_confidence = confidence[valid]
+                for feat1, feat2, shape1, shape2 in batch:
+                    # Extract tensors from feature dicts
+                    batch_keypoints0.append(feat1['keypoints'][0])
+                    batch_descriptors0.append(feat1['descriptors'][0])
+                    batch_keypoints1.append(feat2['keypoints'][0])
+                    batch_descriptors1.append(feat2['descriptors'][0])
+                    batch_sizes0.append(torch.tensor(shape1, device=self.device))
+                    batch_sizes1.append(torch.tensor(shape2, device=self.device))
                 
-                # Apply confidence threshold
-                high_conf_mask = valid_confidence >= self.confidence_threshold
-                filtered_matches = valid_matches[high_conf_mask]
-                filtered_confidence = valid_confidence[high_conf_mask]
+                # Stack into batch tensors
+                # Note: LightGlue expects [B, N, D] format
+                batch_features0 = {
+                    'keypoints': torch.stack(batch_keypoints0, dim=0),
+                    'descriptors': torch.stack(batch_descriptors0, dim=0),
+                    'image_size': torch.stack(batch_sizes0, dim=0)
+                }
+                batch_features1 = {
+                    'keypoints': torch.stack(batch_keypoints1, dim=0),
+                    'descriptors': torch.stack(batch_descriptors1, dim=0),
+                    'image_size': torch.stack(batch_sizes1, dim=0)
+                }
                 
-                all_results.append({
-                    'num_matches': len(filtered_matches),
-                    'avg_confidence': np.mean(filtered_confidence) if len(filtered_confidence) > 0 else 0.0,
-                    'matches': filtered_matches,
-                    'confidence': filtered_confidence
-                })
+                # Perform batch matching
+                matches_dict = self.matcher({'image0': batch_features0, 'image1': batch_features1})
+                
+                # Extract results for each pair in batch
+                matches_batch = matches_dict['matches0'].cpu().numpy()  # [B, N]
+                confidence_batch = matches_dict['matching_scores0'].cpu().numpy()  # [B, N]
+                
+                # Free GPU tensors immediately
+                del batch_features0, batch_features1, matches_dict
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                for i in range(len(batch)):
+                    matches = matches_batch[i]
+                    confidence = confidence_batch[i]
+                    
+                    # Filter by confidence
+                    valid = matches > -1
+                    valid_matches = matches[valid]
+                    valid_confidence = confidence[valid]
+                    
+                    # Apply confidence threshold
+                    high_conf_mask = valid_confidence >= self.confidence_threshold
+                    filtered_matches = valid_matches[high_conf_mask]
+                    filtered_confidence = valid_confidence[high_conf_mask]
+                    
+                    all_results.append({
+                        'num_matches': len(filtered_matches),
+                        'avg_confidence': np.mean(filtered_confidence) if len(filtered_confidence) > 0 else 0.0,
+                        'matches': filtered_matches,
+                        'confidence': filtered_confidence
+                    })
+                
+                # Clean up batch arrays
+                del matches_batch, confidence_batch
+                
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    # OOM error - try with smaller batch
+                    logger.error(f"OOM error with batch size {len(batch)}, falling back to sequential processing")
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    
+                    # Process sequentially as fallback
+                    for feat1, feat2, shape1, shape2 in batch:
+                        try:
+                            result = self.match_features(feat1, feat2, shape1, shape2)
+                            all_results.append(result)
+                        except Exception as e2:
+                            logger.error(f"Failed to match features: {e2}")
+                            all_results.append({
+                                'num_matches': 0,
+                                'avg_confidence': 0.0,
+                                'matches': np.array([]),
+                                'confidence': np.array([])
+                            })
+                else:
+                    raise e
         
         return all_results
     
@@ -548,7 +600,7 @@ class TrackletLightGlueMatcher:
     
     def compute_distance_matrix(self, tracklets: Dict) -> np.ndarray:
         """
-        Compute full distance matrix for all tracklets (optimized)
+        Compute full distance matrix for all tracklets (optimized with memory management)
         
         Args:
             tracklets: Dictionary of tracklet_id -> Tracklet
@@ -564,12 +616,21 @@ class TrackletLightGlueMatcher:
         
         logger.info(f"Computing distance matrix for {n} tracklets using LightGlue")
         
+        # Memory management: clear cache before starting
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
         # Pre-extract features for all tracklets (with caching)
         logger.info("Pre-extracting features for all tracklets...")
         tracklet_features = {}
-        for tid in tqdm(tid_list, desc="Extracting features"):
+        for tid_idx, tid in enumerate(tqdm(tid_list, desc="Extracting features")):
             crops, features = self.compute_tracklet_features(tracklets[tid])
             tracklet_features[tid] = (crops, features)
+            
+            # Memory management: periodically clear cache
+            if tid_idx > 0 and tid_idx % 20 == 0:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
         
         # Compute pairwise distances
         logger.info("Computing pairwise distances...")
@@ -628,10 +689,17 @@ class TrackletLightGlueMatcher:
                         match_score = 1.0 / (1.0 + avg_matches_per_pair / 20.0)
                         confidence_score = 1.0 - avg_confidence
                         distance = 0.6 * match_score + 0.4 * confidence_score
-                        
                         dist_matrix[i][j] = distance
                     
                     pbar.update(1)
+                    
+                    # Memory management: periodically clear cache
+                    if pbar.n % 50 == 0 and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+        
+        # Final cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         logger.info("Distance matrix computation complete")
         return dist_matrix
