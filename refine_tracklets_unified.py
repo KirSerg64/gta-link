@@ -1000,7 +1000,8 @@ def split_tracklets_with_spatial_aware(tmp_trklets,
                                        spatial_hop_threshold=15,
                                        smooth_features=True,
                                        use_continuity_check=True,
-                                       continuity_threshold=0.85):
+                                       continuity_threshold=0.85,
+                                       **kwargs):  # Accept extra parameters for flexibility
     """
     Enhanced splitting that considers BOTH feature clustering AND spatial hops.
     Combines DBSCAN from refine_tracklets.py with spatial analysis from notebook.
@@ -1013,6 +1014,7 @@ def split_tracklets_with_spatial_aware(tmp_trklets,
         smooth_features: Whether to apply temporal smoothing
         use_continuity_check: Enable trajectory continuity protection
         continuity_threshold: Minimum continuity score to protect from splitting
+        **kwargs: Additional parameters (ignored, for compatibility)
     
     Returns:
         Dictionary of split tracklets
@@ -1133,7 +1135,8 @@ def merge_tracklets_hybrid(tracklets,
                            min_iou_threshold=0.3,
                            spatial_zone_check=True,
                            use_velocity=True,
-                           use_iou=True):
+                           use_iou=True,
+                           **kwargs):  # Accept extra parameters (e.g., iou_threshold for segment merging)
     """
     Hybrid merging using BOTH feature similarity AND spatial IoU.
     Combines best practices from both implementations.
@@ -1146,6 +1149,7 @@ def merge_tracklets_hybrid(tracklets,
         spatial_zone_check: Enable zone-based filtering
         use_velocity: Enable motion prediction
         use_iou: Use IoU instead of distance for spatial validation
+        **kwargs: Additional parameters (ignored, for compatibility)
     
     Returns:
         Dictionary of merged tracklets
