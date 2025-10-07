@@ -1017,8 +1017,7 @@ def split_tracklets_with_spatial_aware(tmp_trklets,
     Returns:
         Dictionary of split tracklets
     """
-    from refine_tracklets_enhanced import detect_id_switch
-    
+   
     new_id = max(tmp_trklets.keys()) + 1
     tracklets = {}
     protected_count = 0
@@ -1151,12 +1150,9 @@ def merge_tracklets_hybrid(tracklets,
     Returns:
         Dictionary of merged tracklets
     """
-    from refine_tracklets_enhanced import prioritize_merges_by_confidence
-    
     idx2tid = {idx: tid for idx, tid in enumerate(tracklets.keys())}
     
     # Calculate distance matrix (feature-based)
-    from refine_tracklets_enhanced import get_distance_matrix
     Dist = get_distance_matrix(tracklets)
     
     # Get prioritized merge candidates
@@ -1206,7 +1202,6 @@ def merge_tracklets_hybrid(tracklets,
         if use_iou:
             spatial_ok = check_spatial_constraints_iou(track1, track2, min_iou_threshold, n_frames=3)
         else:
-            from refine_tracklets_enhanced import check_spatial_constraints_robust, get_spatial_constraints
             max_x_range, max_y_range = get_spatial_constraints(tracklets, factor=1.0)
             spatial_ok = check_spatial_constraints_robust(track1, track2, max_x_range, max_y_range, n_frames=3)
         
